@@ -75,25 +75,24 @@ static void verline(int x, int y0, int y1, u32 color) {
 
 static void render() {
 
-    // printf("state.camera_pos.x: %.3f\n", state.camera_pos.x);
-    // printf("state.camera_pos.y: %.3f\n", state.camera_pos.y);
-
-    // printf("state.camera_dir.x: %.3f\n", state.camera_dir.x);
-    // printf("state.camera_dir.y: %.3f\n", state.camera_dir.y);
-
     const v2 rotr_dir = rotr((state.camera_dir));
 
-    // printf("rotr_dir.x: %.3f\n", rotr_dir.x);
-    // printf("rotr_dir.y: %.3f\n", rotr_dir.y);
-
-    const u32 color_wall = 0xFFFF0000;
-    const u32 color_floor = 0xFF222222;
+    static u32 color_wall[4] = {
+        0xFFFF0000,
+        0xFF00FF00,
+        0xFF00FFFF,
+        0xFF0000FF
+    };
+    static u32 color_wall_light[4] = {
+        0xFFFF3333,
+        0xFF33FF33,
+        0xFF33FFFF,
+        0xFF3333FF
+    };
+    const u32 color_floor = 0xFF666666;
     const u32 color_ceil = 0xFF444444;
 
     for (int x = 0; x < SCREEN_SIZE_X; x++) {
-        // int x = 0;
-
-        // printf("x: %d\n", x);
         
         // The column's point in game space
         const f32 dw = state.camera_width/2 - (state.camera_width*x)/SCREEN_SIZE_X;
@@ -102,32 +101,14 @@ static void render() {
             state.camera_pos.y + state.camera_depth*state.camera_dir.y + dw*rotr_dir.y
         };
 
-        // printf("p.x: %.3f\n", p.x);
-        // printf("p.y: %.3f\n", p.y);
-
         // Ray direction through this column
         const v2 dir = normalize( ((v2) {p.x - state.camera_pos.x, p.y - state.camera_pos.y}) );
-
-        // v2 temp = {p.x - state.camera_pos.x, p.y - state.camera_pos.y};
-        // printf("temp.x: %.3f\n", temp.x);
-        // printf("temp.y: %.3f\n", temp.y);
-        // printf("len: %.3f\n", length(temp));
-        // printf("dot: %.3f\n", dot(temp, temp));
-        // printf("dot: %.3f\n", temp.x*temp.x + temp.y*temp.y);
-
-        // printf("dir.x: %.3f\n", dir.x);
-        // printf("dir.y: %.3f\n", dir.y);
 
         // Get p's cell
         int x_ind = (int)(floorf(p.x / TILE_WIDTH));
         int y_ind = (int)(floorf(p.y / TILE_WIDTH));
         f32 x_rem = p.x - TILE_WIDTH*x_ind;
         f32 y_rem = p.y - TILE_WIDTH*y_ind;
-
-        // printf("x_ind: %d\n", x_ind);
-        // printf("y_ind: %d\n", y_ind);
-        // printf("x_rem: %.3f\n", x_rem);
-        // printf("y_rem: %.3f\n", y_rem);
 
         // Step through cells until we hit an occupied cell
         int n_steps = 0;
@@ -182,11 +163,6 @@ static void render() {
             x_rem += dir.x * dt_best - TILE_WIDTH*dx_ind;
             y_rem += dir.y * dt_best - TILE_WIDTH*dy_ind;
 
-            // printf("(%02d) x_ind: %d\n", n_steps, x_ind);
-            // printf("     y_ind: %d\n", y_ind);
-            // printf("     x_rem: %.3f\n", x_rem);
-            // printf("     y_rem: %.3f\n", y_rem);
-
             // Check to see if the new cell is solid
             if (MAPDATA[y_ind*8 + x_ind] > 0) {
                 break;
@@ -199,13 +175,8 @@ static void render() {
             TILE_WIDTH*y_ind + y_rem
         };
 
-        // printf("collision.x: %.3f\n", collision.x);
-        // printf("collision.y: %.3f\n", collision.y);
-
         // Calculate the ray length
         const f32 ray_len = length( ((v2) {collision.x - state.camera_pos.x, collision.y - state.camera_pos.y}) );
-
-        // printf("ray_len: %.3f\n", ray_len);
 
         // Calculate the pixel bounds that we fill the wall in for
         int y_lo = (int)(SCREEN_SIZE_Y/2.0f - state.camera_depth*state.camera_z/ray_len * SCREEN_SIZE_Y);
@@ -213,11 +184,10 @@ static void render() {
         y_lo = max(y_lo, 0);
         y_hi = min(y_hi, SCREEN_SIZE_Y-1);
 
-        // printf("y_lo: %d\n", y_lo);
-        // printf("y_hi: %d\n", y_hi);
+        u32 color_wall_to_render = x_rem > y_rem ? color_wall[MAPDATA[y_ind*8 + x_ind]-1] : color_wall_light[MAPDATA[y_ind*8 + x_ind]-1];
 
         verline(x, 0, y_lo-1, color_floor);
-        verline(x, y_lo, y_hi, color_wall);
+        verline(x, y_lo, y_hi, color_wall_to_render);
         verline(x, y_hi + 1, SCREEN_SIZE_Y-1, color_ceil);
     }
 }
@@ -255,8 +225,8 @@ int main(int argc, char *argv[]) {
 
     // Init camera
     state.camera_pos = (v2) { 5.0f, 5.0f };
-    state.camera_dir = normalize(((v2) {-1.0f, 0.0f}));
-    state.camera_width = 0.5f;
+    state.camera_dir = ((v2) {cos(0.0), sin(0.0)});
+    state.camera_width = 0.2f;
     state.camera_height = state.camera_width * SCREEN_SIZE_Y / SCREEN_SIZE_X;
     state.camera_depth = 0.6f;
     state.camera_z = 0.4;
@@ -273,6 +243,10 @@ int main(int argc, char *argv[]) {
         }
 
         render();
+
+        float theta = atan2(state.camera_dir.y, state.camera_dir.x);
+        theta += 0.025f;
+        state.camera_dir = ((v2) {cos(theta), sin(theta)});
 
         SDL_UpdateTexture(state.texture, NULL, state.pixels, SCREEN_SIZE_X * 4);
         SDL_RenderCopyEx(
