@@ -101,8 +101,14 @@ static void render() {
             state.camera_pos.y + state.camera_depth*state.camera_dir.y + dw*rotr_dir.y
         };
 
+        // Camera to pixel column
+        const v2 cp = {p.x - state.camera_pos.x, p.y - state.camera_pos.y};
+
         // Ray direction through this column
-        const v2 dir = normalize( ((v2) {p.x - state.camera_pos.x, p.y - state.camera_pos.y}) );
+        const v2 dir = normalize( (cp) );
+
+        // Distance from the camera to the column
+        const f32 cam_len = length( (cp) );
 
         // Get p's cell
         int x_ind = (int)(floorf(p.x / TILE_WIDTH));
@@ -179,8 +185,8 @@ static void render() {
         const f32 ray_len = length( ((v2) {collision.x - state.camera_pos.x, collision.y - state.camera_pos.y}) );
 
         // Calculate the pixel bounds that we fill the wall in for
-        int y_lo = (int)(SCREEN_SIZE_Y/2.0f - state.camera_depth*state.camera_z/ray_len * SCREEN_SIZE_Y);
-        int y_hi = (int)(SCREEN_SIZE_Y/2.0f + state.camera_depth*(WALL_HEIGHT - state.camera_z)/ray_len * SCREEN_SIZE_Y);
+        int y_lo = (int)(SCREEN_SIZE_Y/2.0f - cam_len*state.camera_z/ray_len * SCREEN_SIZE_Y);
+        int y_hi = (int)(SCREEN_SIZE_Y/2.0f + cam_len*(WALL_HEIGHT - state.camera_z)/ray_len * SCREEN_SIZE_Y);
         y_lo = max(y_lo, 0);
         y_hi = min(y_hi, SCREEN_SIZE_Y-1);
 
