@@ -240,11 +240,15 @@ int main(int argc, char *argv[]) {
     // Main loop
     state.quit = 0;
     while (state.quit == 0) {
-        SDL_Event windowEvent;
-        while (SDL_PollEvent(&windowEvent)) {
-            if (windowEvent.type == SDL_QUIT) {
+        SDL_Event event;
+        while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_QUIT) {
                 state.quit = 1;
                 break;
+            } else if (event.type == SDL_KEYDOWN) {
+                printf("Key Down!\n");
+            } else if (event.type == SDL_KEYUP) {
+                printf("Key Up!\n");
             }
         }
 

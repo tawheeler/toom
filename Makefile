@@ -5,7 +5,7 @@
 # Compiler settings - Can be customized.
 CC = gcc
 CXXFLAGS = -std=c11 -Wall -g # Note: -g adds proper debugging with symbols
-LDFLAGS = -lSDL2 -lGL -lm
+LDFLAGS = -lSDL2 -lm
 
 # Makefile settings - Can be customized.
 APPNAME = TOOM
