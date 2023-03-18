@@ -152,6 +152,7 @@ struct {
     f32 camera_z;
 
     v2 player_speed;
+    f32 player_omega;
 
     struct KeyBoardState keyboard_state;
 } state;
@@ -173,20 +174,12 @@ static void tick(f32 dt) {
         input_dir.y += 1.0;
     }
 
-    const f32 kPlayerRotPerSec = 1.5;
+    int input_rot_dir = 0; // Right-hand rotation in plane (CCW)
     if (is_pressed(state.keyboard_state.q)) {
-        // Right-hand rotation in plane (CCW)
-        float theta = atan2(state.camera_dir.y, state.camera_dir.x);
-        theta += kPlayerRotPerSec * dt;
-        state.camera_dir = ((v2) {cos(theta), sin(theta)});   
-        state.camera_dir_rotr = rotr((state.camera_dir));
+        input_rot_dir += 1;
     }
     if (is_pressed(state.keyboard_state.e)) {
-        // Left-hand rotation in plane (CW)
-        float theta = atan2(state.camera_dir.y, state.camera_dir.x);
-        theta -= kPlayerRotPerSec * dt;
-        state.camera_dir = ((v2) {cos(theta), sin(theta)});   
-        state.camera_dir_rotr = rotr((state.camera_dir));
+        input_rot_dir -= 1;
     }
 
     if (is_pressed(state.keyboard_state.three)) {
@@ -216,12 +209,16 @@ static void tick(f32 dt) {
 
     // Update the player's velocity
     const f32 kPlayerInputAccel = 4.5;
+    const f32 kPlayerInputAngularAccel = 7.5;
     const f32 kPlayerMaxSpeed = 3.0;
+    const f32 kPlayerMaxOmega = 3.0;
     const f32 kAirFriction = 0.9;
+    const f32 kAirFrictionRot = 0.85;
 
     // Note: Speed is in the global frame
     state.player_speed.x += (state.camera_dir.x*input_dir.x + state.camera_dir_rotr.x*input_dir.y) * kPlayerInputAccel * dt;
     state.player_speed.y += (state.camera_dir.y*input_dir.x + state.camera_dir_rotr.y*input_dir.y) * kPlayerInputAccel * dt;
+    state.player_omega += input_rot_dir * kPlayerInputAngularAccel * dt;
 
     // Clamp the velocity to a maximum magnitude
     f32 speed = length(state.player_speed);
@@ -229,14 +226,26 @@ static void tick(f32 dt) {
         state.player_speed.x *= kPlayerMaxSpeed / speed;
         state.player_speed.y *= kPlayerMaxSpeed / speed;
     }
+    if (state.player_omega > kPlayerMaxOmega) {
+        state.player_omega *= kPlayerMaxOmega / state.player_omega;
+    } else if (state.player_omega < -kPlayerMaxOmega) {
+        state.player_omega *= - kPlayerMaxOmega / state.player_omega;
+    }
 
     // Update the player's position
     state.camera_pos.x += state.player_speed.x * dt;
     state.camera_pos.y += state.player_speed.y * dt;
 
+    // Update the player's rotational heading
+    float theta = atan2(state.camera_dir.y, state.camera_dir.x);
+    theta += state.player_omega * dt;
+    state.camera_dir = ((v2) {cos(theta), sin(theta)});   
+    state.camera_dir_rotr = rotr((state.camera_dir));
+
     // Apply air friction
     state.player_speed.x *= kAirFriction;
     state.player_speed.y *= kAirFriction;
+    state.player_omega *= kAirFrictionRot;
 }
 
 
@@ -293,53 +302,70 @@ static void render() {
         f32 x_rem = x_rem_cam;
         f32 y_rem = y_rem_cam;
 
+        // We will be raycasting through cells of unit width.
+        // Our ray's position vs time is:
+        // x(t) = x_rem + dir.x * dt
+        // y(t) = y_rem + dir.y * dt
+
+        // We cross x = 0 if dir.x < 0, at dt = -x_rem/dir.x
+        // We cross x = 1 if dir.x > 0, at dt = (1-x_rem)/dir.x
+        // We cross y = 0 if dir.y < 0, at dt = -y_rem/dir.y
+        // We cross y = 1 if dir.y > 0, at dt = (1-y_rem)/dir.y
+
+        // We can generalize this to:
+        //   dx_ind_dir = -1 if dir.x < 0, at dt = -1/dir.x * x_rem + 0.0
+        //   dx_ind_dir =  1 if dir.x > 0, at dt = -1/dir.x * x_rem + 1/dir.x
+        //   dx_ind_dir =  0 if dir.x = 0, at dt =        0 * x_rem + INFINITY
+        //   dy_ind_dir = -1 if dir.y < 0, at dt = -1/dir.y * y_rem + 0.0
+        //   dy_ind_dir =  1 if dir.y > 0, at dt = -1/dir.y * y_rem + 1/dir.y
+        //   dy_ind_dir =  0 if dir.x = 0, at dt =        0 * y_rem + INFINITY
+    
+        int dx_ind_dir = 0;
+        f32 dx_a = 0.0;
+        f32 dx_b = INFINITY;
+        if (dir.x < 0) {
+            dx_ind_dir = -1;
+            dx_a = -1.0f/dir.x;
+            dx_b = 0.0;
+        } else if (dir.x > 0) {
+            dx_ind_dir = 1;
+            dx_a = -1.0f/dir.x;
+            dx_b = 1.0f/dir.x;
+        }
+
+        int dy_ind_dir = 0;
+        f32 dy_a = 0.0;
+        f32 dy_b = INFINITY;
+        if (dir.y < 0) {
+            dy_ind_dir = -1;
+            dy_a = -1.0f/dir.y;
+            dy_b = 0.0;
+        } else if (dir.y > 0) {
+            dy_ind_dir = 1;
+            dy_a = -1.0f/dir.y;
+            dy_b = 1.0f/dir.y;
+        }
+
         // Step through cells until we hit an occupied cell
         int n_steps = 0;
         int dx_ind, dy_ind;
         while (n_steps < 100) {
             n_steps += 1;
 
-            // x(t) = x_rem + dir.x * dt
-            // y(t) = y_rem + dir.y * dt
-
-            // We cross x = 0 if dir.x < 0, at dt = -x_rem/dir.x
-            // We cross x = 1 if dir.x > 0, at dt = (1-x_rem)/dir.x
-            // We cross y = 0 if dir.y < 0, at dt = -y_rem/dir.y
-            // We cross y = 1 if dir.y > 0, at dt = (1-y_rem)/dir.y
-
-            // TODO: Remove these if statments by making it a general a*x + b calc.
+            f32 dt_best = INFINITY;
             dx_ind = 0;
             dy_ind = 0;
-            f32 dt_best = 999.0;
-            if (dir.x < 0) {
-                f32 dt = -x_rem/dir.x;
-                if (dt < dt_best) {
-                    dt_best = dt;
-                    dx_ind = -1;
-                    dy_ind =  0;
-                }
-            } else if (dir.x > 0) {
-                f32 dt = (1-x_rem)/dir.x;
-                if (dt < dt_best) {
-                    dt_best = dt;
-                    dx_ind = 1;
-                    dy_ind = 0;
-                }
-            }
-            if (dir.y < 0) {
-                f32 dt = -y_rem/dir.y;
-                if (dt < dt_best) {
-                    dt_best = dt;
-                    dx_ind =  0;
-                    dy_ind = -1;
-                }
-            } else if (dir.y > 0) {
-                f32 dt = (1-y_rem)/dir.y;
-                if (dt < dt_best) {
-                    dt_best = dt;
-                    dx_ind = 0;
-                    dy_ind = 1;
-                }
+            
+            f32 dt_x = dx_a*x_rem + dx_b;
+            f32 dt_y = dy_a*y_rem + dy_b;
+            if (dt_x < dt_y) {
+                dt_best = dt_x;
+                dx_ind = dx_ind_dir;
+                dy_ind = 0;
+            } else {
+                dt_best = dt_y;
+                dx_ind = 0;
+                dy_ind = dy_ind_dir;
             }
 
             // Move up to the next cell
@@ -418,6 +444,7 @@ int main(int argc, char *argv[]) {
 
     // Init player state
     state.player_speed = (v2) { 0.0f, 0.0f };
+    state.player_omega = 0.0f;
 
     // Init keyboard
     clear_keyboard_state(&state.keyboard_state);
