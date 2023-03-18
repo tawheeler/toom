@@ -19,8 +19,8 @@ typedef int64_t i64;
 typedef size_t usize;
 typedef ssize_t isize;
 
-#define SCREEN_SIZE_X 320
-#define SCREEN_SIZE_Y 180
+#define SCREEN_SIZE_X 640
+#define SCREEN_SIZE_Y 360
 
 #define TILE_WIDTH 1.0f
 #define WALL_HEIGHT 1.2f
@@ -149,7 +149,6 @@ struct {
     v2 camera_dir_rotr;
     f32 camera_width;
     f32 camera_height;
-    f32 camera_depth;
     f32 camera_z;
 
     v2 player_speed;
@@ -190,14 +189,6 @@ static void tick(f32 dt) {
         state.camera_dir_rotr = rotr((state.camera_dir));
     }
 
-    if (is_pressed(state.keyboard_state.one)) {
-        state.camera_depth *= 0.95;
-        printf("camera depth: %.3f\n", state.camera_depth);
-    }
-    if (is_pressed(state.keyboard_state.two)) {
-        state.camera_depth /= 0.95;
-        printf("camera depth: %.3f\n", state.camera_depth);
-    }
     if (is_pressed(state.keyboard_state.three)) {
         state.camera_z *= 0.95;
         printf("camera z: %.3f\n", state.camera_z);
@@ -228,6 +219,7 @@ static void tick(f32 dt) {
     const f32 kPlayerMaxSpeed = 3.0;
     const f32 kAirFriction = 0.9;
 
+    // Note: Speed is in the global frame
     state.player_speed.x += (state.camera_dir.x*input_dir.x + state.camera_dir_rotr.x*input_dir.y) * kPlayerInputAccel * dt;
     state.player_speed.y += (state.camera_dir.y*input_dir.x + state.camera_dir_rotr.y*input_dir.y) * kPlayerInputAccel * dt;
 
@@ -271,13 +263,19 @@ static void render() {
     const u32 color_floor = 0xFF666666;
     const u32 color_ceil = 0xFF444444;
 
+    // Get camera location's cell coordinates
+    int x_ind_cam = (int)(floorf(state.camera_pos.x / TILE_WIDTH));
+    int y_ind_cam = (int)(floorf(state.camera_pos.y / TILE_WIDTH));
+    f32 x_rem_cam = state.camera_pos.x - TILE_WIDTH*x_ind_cam;
+    f32 y_rem_cam = state.camera_pos.y - TILE_WIDTH*y_ind_cam;
+
     for (int x = 0; x < SCREEN_SIZE_X; x++) {
         
         // The column's point in game space
         const f32 dw = state.camera_width/2 - (state.camera_width*x)/SCREEN_SIZE_X;
         const v2 p = {
-            state.camera_pos.x + state.camera_depth*state.camera_dir.x + dw*state.camera_dir_rotr.x,
-            state.camera_pos.y + state.camera_depth*state.camera_dir.y + dw*state.camera_dir_rotr.y
+            state.camera_pos.x + state.camera_dir.x + dw*state.camera_dir_rotr.x,
+            state.camera_pos.y + state.camera_dir.y + dw*state.camera_dir_rotr.y
         };
 
         // Camera to pixel column
@@ -289,11 +287,11 @@ static void render() {
         // Ray direction through this column
         const v2 dir = {cp.x / cam_len, cp.y  /cam_len};
 
-        // Get p's cell
-        int x_ind = (int)(floorf(p.x / TILE_WIDTH));
-        int y_ind = (int)(floorf(p.y / TILE_WIDTH));
-        f32 x_rem = p.x - TILE_WIDTH*x_ind;
-        f32 y_rem = p.y - TILE_WIDTH*y_ind;
+        // Start at the camera pos
+        int x_ind = x_ind_cam;
+        int y_ind = y_ind_cam;
+        f32 x_rem = x_rem_cam;
+        f32 y_rem = y_rem_cam;
 
         // Step through cells until we hit an occupied cell
         int n_steps = 0;
@@ -309,6 +307,7 @@ static void render() {
             // We cross y = 0 if dir.y < 0, at dt = -y_rem/dir.y
             // We cross y = 1 if dir.y > 0, at dt = (1-y_rem)/dir.y
 
+            // TODO: Remove these if statments by making it a general a*x + b calc.
             dx_ind = 0;
             dy_ind = 0;
             f32 dt_best = 999.0;
@@ -413,9 +412,8 @@ int main(int argc, char *argv[]) {
     state.camera_pos = (v2) { 5.0f, 5.0f };
     state.camera_dir = ((v2) {cos(0.0), sin(0.0)});
     state.camera_dir_rotr = rotr((state.camera_dir));
-    state.camera_width = 0.6f;
+    state.camera_width = 1.5f;
     state.camera_height = state.camera_width * SCREEN_SIZE_Y / SCREEN_SIZE_X;
-    state.camera_depth = 0.4f;
     state.camera_z = 0.4;
 
     // Init player state
@@ -504,7 +502,7 @@ int main(int argc, char *argv[]) {
         const u32 time_end = SDL_GetTicks();
         const u32 ms_elapsed = time_end - time_start;
         const f32 fps = 1000.0f / max(1, ms_elapsed);
-        // printf("FPS: %.1f\n", fps);
+        printf("FPS: %.1f\n", fps);
     }
 
     SDL_DestroyWindow(state.window);
