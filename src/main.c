@@ -152,30 +152,26 @@ struct {
     f32 camera_depth;
     f32 camera_z;
 
+    v2 player_speed;
+
     struct KeyBoardState keyboard_state;
 } state;
 
 
 static void tick(f32 dt) {
 
-    // Process player input
-
-    const f32 kPlayerStepPerSec = 1.25;
+    v2 input_dir = {0.0, 0.0}; // In the body frame, which is right-handed, so y points left.
     if (is_pressed(state.keyboard_state.w)) {
-        state.camera_pos.x += kPlayerStepPerSec * dt * state.camera_dir.x;
-        state.camera_pos.y += kPlayerStepPerSec * dt * state.camera_dir.y;
+        input_dir.x += 1.0;
     }
     if (is_pressed(state.keyboard_state.s)) {
-        state.camera_pos.x -= kPlayerStepPerSec * dt * state.camera_dir.x;
-        state.camera_pos.y -= kPlayerStepPerSec * dt * state.camera_dir.y;
+        input_dir.x -= 1.0;
     }
     if (is_pressed(state.keyboard_state.d)) {
-        state.camera_pos.x -= kPlayerStepPerSec * dt * state.camera_dir_rotr.x;
-        state.camera_pos.y -= kPlayerStepPerSec * dt * state.camera_dir_rotr.y;
+        input_dir.y -= 1.0;
     }
     if (is_pressed(state.keyboard_state.a)) {
-        state.camera_pos.x += kPlayerStepPerSec * dt * state.camera_dir_rotr.x;
-        state.camera_pos.y += kPlayerStepPerSec * dt * state.camera_dir_rotr.y;
+        input_dir.y += 1.0;
     }
 
     const f32 kPlayerRotPerSec = 1.5;
@@ -226,6 +222,29 @@ static void tick(f32 dt) {
         state.camera_width /= 0.95;
         printf("camera width: %.3f\n", state.camera_width);
     }
+
+    // Update the player's velocity
+    const f32 kPlayerInputAccel = 4.5;
+    const f32 kPlayerMaxSpeed = 3.0;
+    const f32 kAirFriction = 0.9;
+
+    state.player_speed.x += (state.camera_dir.x*input_dir.x + state.camera_dir_rotr.x*input_dir.y) * kPlayerInputAccel * dt;
+    state.player_speed.y += (state.camera_dir.y*input_dir.x + state.camera_dir_rotr.y*input_dir.y) * kPlayerInputAccel * dt;
+
+    // Clamp the velocity to a maximum magnitude
+    f32 speed = length(state.player_speed);
+    if (speed > kPlayerMaxSpeed) {
+        state.player_speed.x *= kPlayerMaxSpeed / speed;
+        state.player_speed.y *= kPlayerMaxSpeed / speed;
+    }
+
+    // Update the player's position
+    state.camera_pos.x += state.player_speed.x * dt;
+    state.camera_pos.y += state.player_speed.y * dt;
+
+    // Apply air friction
+    state.player_speed.x *= kAirFriction;
+    state.player_speed.y *= kAirFriction;
 }
 
 
@@ -245,8 +264,8 @@ static void render() {
     };
     static u32 color_wall_light[4] = {
         0xFFFF3333,
-        0xFF33FF33,
-        0xFF33FFFF,
+        0xFF66FF66,
+        0xFF88FFFF,
         0xFF3333FF
     };
     const u32 color_floor = 0xFF666666;
@@ -278,6 +297,7 @@ static void render() {
 
         // Step through cells until we hit an occupied cell
         int n_steps = 0;
+        int dx_ind, dy_ind;
         while (n_steps < 100) {
             n_steps += 1;
 
@@ -289,8 +309,8 @@ static void render() {
             // We cross y = 0 if dir.y < 0, at dt = -y_rem/dir.y
             // We cross y = 1 if dir.y > 0, at dt = (1-y_rem)/dir.y
 
-            int dx_ind = 0;
-            int dy_ind = 0;
+            dx_ind = 0;
+            dy_ind = 0;
             f32 dt_best = 999.0;
             if (dir.x < 0) {
                 f32 dt = -x_rem/dir.x;
@@ -350,8 +370,7 @@ static void render() {
         y_lo = max(y_lo, 0);
         y_hi = min(y_hi, SCREEN_SIZE_Y-1);
 
-        // TODO: This is not correct
-        u32 color_wall_to_render = x_rem > y_rem ? color_wall[MAPDATA[y_ind*8 + x_ind]-1] : color_wall_light[MAPDATA[y_ind*8 + x_ind]-1];
+        u32 color_wall_to_render = (dx_ind == 0) ? color_wall[MAPDATA[y_ind*8 + x_ind]-1] : color_wall_light[MAPDATA[y_ind*8 + x_ind]-1];
 
         verline(x, 0, y_lo-1, color_floor);
         verline(x, y_lo, y_hi, color_wall_to_render);
@@ -398,6 +417,9 @@ int main(int argc, char *argv[]) {
     state.camera_height = state.camera_width * SCREEN_SIZE_Y / SCREEN_SIZE_X;
     state.camera_depth = 0.4f;
     state.camera_z = 0.4;
+
+    // Init player state
+    state.player_speed = (v2) { 0.0f, 0.0f };
 
     // Init keyboard
     clear_keyboard_state(&state.keyboard_state);
