@@ -269,18 +269,6 @@ static void draw_column(int x, int y0, int y1, u32 color) {
 }
 
 static void render() {
-    // static u32 color_wall[4] = {
-    //     0xFFFF0000,
-    //     0xFF00FF00,
-    //     0xFF00FFFF,
-    //     0xFF0000FF
-    // };
-    // static u32 color_wall_light[4] = {
-    //     0xFFFF3333,
-    //     0xFF66FF66,
-    //     0xFF88FFFF,
-    //     0xFF3333FF
-    // };
     const u32 color_floor = 0xFF666666;
     const u32 color_ceil = 0xFF444444;
 
@@ -405,15 +393,22 @@ static void render() {
         int y_hi_capped = min(y_hi, SCREEN_SIZE_Y-1);
 
         // u32 color_wall_to_render = (dx_ind == 0) ? color_wall[MAPDATA[y_ind*8 + x_ind]-1] : color_wall_light[MAPDATA[y_ind*8 + x_ind]-1];
-        
-        u32 texture_x_offset = 64 * ((dx_ind == 0) ? 0 : 1);
-        u32 texture_y_offset = 0;
 
         draw_column(x, 0, y_lo_capped-1, color_floor);
-        // draw_column(x, y_lo, y_hi, color_wall_to_render);
-        // draw_texture_column(x, y_lo, y_hi);
         {
-            f32 rem = (dx_ind == 0) ? x_rem : y_rem; // [0,TILE_WIDTH]
+            u32 texture_x_offset = 0;
+            u32 texture_y_offset = 0;
+            if (dx_ind == 0) {
+                // Draw the light version
+                texture_x_offset = 64;
+            }
+
+            f32 rem = 0.0f;
+            if (dx_ind == 0) {
+                rem = dy_ind < 0 ? TILE_WIDTH - x_rem : x_rem;
+            } else {
+                rem = dx_ind < 0 ? y_rem : TILE_WIDTH - y_rem;
+            }
             u32 texture_x = (int) (64 * rem / TILE_WIDTH);
             u32 baseline = texture_y_offset + (texture_x+texture_x_offset)*bitmap.n_pixels_per_column;
             for (int y = y_hi_capped; y >= y_lo_capped; y--) {
