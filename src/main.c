@@ -1,6 +1,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <sys/time.h>
 #include <SDL2/SDL.h>
 
 #define ASSERT(_e, ...) if (!(_e)) { fprintf(stderr, __VA_ARGS__); exit(1); }
@@ -137,6 +138,8 @@ bool is_pressed(enum KeyboardKeyState state) {
     return lookup[state];
 }
 
+// TODO: Could we store the pixels in column-major? We're always rendering
+//       in vertical lines, so I suspect that would be more efficient.
 struct { 
     SDL_Window *window;
     SDL_Texture *texture;
@@ -250,7 +253,7 @@ static void tick(f32 dt) {
 
 
 // Fill all pixels in the vertical line at x between y0 and y1 with the given color.
-static void verline(int x, int y0, int y1, u32 color) {
+static void draw_column(int x, int y0, int y1, u32 color) {
     for (int y = y0; y <= y1; y++) {
         state.pixels[(y * SCREEN_SIZE_X) + x] = color;
     }
@@ -280,15 +283,12 @@ static void render() {
 
     for (int x = 0; x < SCREEN_SIZE_X; x++) {
         
-        // The column's point in game space
-        const f32 dw = state.camera_width/2 - (state.camera_width*x)/SCREEN_SIZE_X;
-        const v2 p = {
-            state.camera_pos.x + state.camera_dir.x + dw*state.camera_dir_rotr.x,
-            state.camera_pos.y + state.camera_dir.y + dw*state.camera_dir_rotr.y
-        };
-
         // Camera to pixel column
-        const v2 cp = {p.x - state.camera_pos.x, p.y - state.camera_pos.y};
+        const f32 dw = state.camera_width/2 - (state.camera_width*x)/SCREEN_SIZE_X;
+        const v2 cp = {
+            state.camera_dir.x + dw*state.camera_dir_rotr.x,
+            state.camera_dir.y + dw*state.camera_dir_rotr.y
+        };
 
         // Distance from the camera to the column
         const f32 cam_len = length( (cp) );
@@ -307,17 +307,17 @@ static void render() {
         // x(t) = x_rem + dir.x * dt
         // y(t) = y_rem + dir.y * dt
 
-        // We cross x = 0 if dir.x < 0, at dt = -x_rem/dir.x
-        // We cross x = 1 if dir.x > 0, at dt = (1-x_rem)/dir.x
-        // We cross y = 0 if dir.y < 0, at dt = -y_rem/dir.y
-        // We cross y = 1 if dir.y > 0, at dt = (1-y_rem)/dir.y
+        // We cross x = 0          if dir.x < 0, at dt = -x_rem/dir.x
+        // We cross x = TILE_WIDTH if dir.x > 0, at dt = (TILE_WIDTH-x_rem)/dir.x
+        // We cross y = 0          if dir.y < 0, at dt = -y_rem/dir.y
+        // We cross y = TILE_WIDTH if dir.y > 0, at dt = (TILE_WIDTH-y_rem)/dir.y
 
         // We can generalize this to:
         //   dx_ind_dir = -1 if dir.x < 0, at dt = -1/dir.x * x_rem + 0.0
-        //   dx_ind_dir =  1 if dir.x > 0, at dt = -1/dir.x * x_rem + 1/dir.x
+        //   dx_ind_dir =  1 if dir.x > 0, at dt = -1/dir.x * x_rem + TILE_WIDTH/dir.x
         //   dx_ind_dir =  0 if dir.x = 0, at dt =        0 * x_rem + INFINITY
         //   dy_ind_dir = -1 if dir.y < 0, at dt = -1/dir.y * y_rem + 0.0
-        //   dy_ind_dir =  1 if dir.y > 0, at dt = -1/dir.y * y_rem + 1/dir.y
+        //   dy_ind_dir =  1 if dir.y > 0, at dt = -1/dir.y * y_rem + TILE_WIDTH/dir.y
         //   dy_ind_dir =  0 if dir.x = 0, at dt =        0 * y_rem + INFINITY
     
         int dx_ind_dir = 0;
@@ -330,7 +330,7 @@ static void render() {
         } else if (dir.x > 0) {
             dx_ind_dir = 1;
             dx_a = -1.0f/dir.x;
-            dx_b = 1.0f/dir.x;
+            dx_b = TILE_WIDTH/dir.x;
         }
 
         int dy_ind_dir = 0;
@@ -343,7 +343,7 @@ static void render() {
         } else if (dir.y > 0) {
             dy_ind_dir = 1;
             dy_a = -1.0f/dir.y;
-            dy_b = 1.0f/dir.y;
+            dy_b = TILE_WIDTH/dir.y;
         }
 
         // Step through cells until we hit an occupied cell
@@ -397,9 +397,9 @@ static void render() {
 
         u32 color_wall_to_render = (dx_ind == 0) ? color_wall[MAPDATA[y_ind*8 + x_ind]-1] : color_wall_light[MAPDATA[y_ind*8 + x_ind]-1];
 
-        verline(x, 0, y_lo-1, color_floor);
-        verline(x, y_lo, y_hi, color_wall_to_render);
-        verline(x, y_hi + 1, SCREEN_SIZE_Y-1, color_ceil);
+        draw_column(x, 0, y_lo-1, color_floor);
+        draw_column(x, y_lo, y_hi, color_wall_to_render);
+        draw_column(x, y_hi + 1, SCREEN_SIZE_Y-1, color_ceil);
     }
 }
 
@@ -449,11 +449,15 @@ int main(int argc, char *argv[]) {
     // Init keyboard
     clear_keyboard_state(&state.keyboard_state);
 
+    // Time structs
+    struct timeval timeval_start, timeval_end;
+
     // Main loop
     u32 time_prev_tick = SDL_GetTicks();
     state.quit = 0;
     while (state.quit == 0) {
         const u32 time_start = SDL_GetTicks();
+        gettimeofday(&timeval_start, NULL);
 
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
@@ -505,13 +509,21 @@ int main(int argc, char *argv[]) {
             }
         }
 
+        // TODO: Move to more accurate timing?
         const u32 time_tick_start = SDL_GetTicks();
         const f32 dt = (time_tick_start - time_prev_tick) / 1000.0f;
         tick(dt);
         time_prev_tick = time_tick_start;
 
         render();
+
         decay_keyboard_state(&state.keyboard_state);
+
+        // Get timer end for all the non-SDL stuff
+        gettimeofday(&timeval_end, NULL);
+        f64 game_ms_elapsed = (timeval_end.tv_sec - timeval_start.tv_sec) * 1000.0;  // sec to ms
+        game_ms_elapsed += (timeval_end.tv_usec - timeval_start.tv_usec) / 1000.0;   // us to ms
+        printf("Game: %.3f ms, %.1f fps\n", game_ms_elapsed, 1000.0f / max(1.0f, game_ms_elapsed));
 
         SDL_UpdateTexture(state.texture, NULL, state.pixels, SCREEN_SIZE_X * 4);
         SDL_RenderCopyEx(
