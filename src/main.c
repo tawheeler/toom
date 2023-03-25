@@ -24,7 +24,7 @@ typedef ssize_t isize;
 #define SCREEN_SIZE_Y 360
 
 #define TILE_WIDTH 1.0f
-#define WALL_HEIGHT 1.2f
+#define WALL_HEIGHT 1.0f
 
 typedef struct v2_s {f32 x, y;} v2;
 typedef struct v2i_s { i32 x, y;} v2i;
@@ -51,6 +51,15 @@ static u8 MAPDATA[8*8] = {
     1, 0, 0, 0, 0, 0, 0, 1,
     1, 1, 1, 1, 1, 1, 1, 1,
 };
+
+struct Bitmap {
+    u32 n_pixels;
+    u32 n_pixels_per_column;
+    u32* abgr; // pixel x, y is at abgr[y + x*n_pixels_per_column]
+};
+
+// The global variable of our main bitmap.
+struct Bitmap bitmap;
 
 enum KeyboardKeyState {
     KeyboardKeyState_Depressed = 0, // No recent event, key is still up
@@ -260,18 +269,18 @@ static void draw_column(int x, int y0, int y1, u32 color) {
 }
 
 static void render() {
-    static u32 color_wall[4] = {
-        0xFFFF0000,
-        0xFF00FF00,
-        0xFF00FFFF,
-        0xFF0000FF
-    };
-    static u32 color_wall_light[4] = {
-        0xFFFF3333,
-        0xFF66FF66,
-        0xFF88FFFF,
-        0xFF3333FF
-    };
+    // static u32 color_wall[4] = {
+    //     0xFFFF0000,
+    //     0xFF00FF00,
+    //     0xFF00FFFF,
+    //     0xFF0000FF
+    // };
+    // static u32 color_wall_light[4] = {
+    //     0xFFFF3333,
+    //     0xFF66FF66,
+    //     0xFF88FFFF,
+    //     0xFF3333FF
+    // };
     const u32 color_floor = 0xFF666666;
     const u32 color_ceil = 0xFF444444;
 
@@ -392,18 +401,53 @@ static void render() {
         // Calculate the pixel bounds that we fill the wall in for
         int y_lo = (int)(SCREEN_SIZE_Y/2.0f - cam_len*state.camera_z/ray_len * SCREEN_SIZE_Y / state.camera_height);
         int y_hi = (int)(SCREEN_SIZE_Y/2.0f + cam_len*(WALL_HEIGHT - state.camera_z)/ray_len * SCREEN_SIZE_Y / state.camera_height);
-        y_lo = max(y_lo, 0);
-        y_hi = min(y_hi, SCREEN_SIZE_Y-1);
+        int y_lo_capped = max(y_lo, 0);
+        int y_hi_capped = min(y_hi, SCREEN_SIZE_Y-1);
 
-        u32 color_wall_to_render = (dx_ind == 0) ? color_wall[MAPDATA[y_ind*8 + x_ind]-1] : color_wall_light[MAPDATA[y_ind*8 + x_ind]-1];
+        // u32 color_wall_to_render = (dx_ind == 0) ? color_wall[MAPDATA[y_ind*8 + x_ind]-1] : color_wall_light[MAPDATA[y_ind*8 + x_ind]-1];
+        
+        u32 texture_x_offset = 64 * ((dx_ind == 0) ? 0 : 1);
+        u32 texture_y_offset = 0;
 
-        draw_column(x, 0, y_lo-1, color_floor);
-        draw_column(x, y_lo, y_hi, color_wall_to_render);
-        draw_column(x, y_hi + 1, SCREEN_SIZE_Y-1, color_ceil);
+        draw_column(x, 0, y_lo_capped-1, color_floor);
+        // draw_column(x, y_lo, y_hi, color_wall_to_render);
+        // draw_texture_column(x, y_lo, y_hi);
+        {
+            f32 rem = (dx_ind == 0) ? x_rem : y_rem; // [0,TILE_WIDTH]
+            u32 texture_x = (int) (64 * rem / TILE_WIDTH);
+            u32 baseline = texture_y_offset + (texture_x+texture_x_offset)*bitmap.n_pixels_per_column;
+            for (int y = y_hi_capped; y >= y_lo_capped; y--) {
+                u32 texture_y = (y_hi - y) * 64 / max(1, y_hi - y_lo);
+                u32 color = bitmap.abgr[texture_y+baseline];
+                state.pixels[(y * SCREEN_SIZE_X) + x] = color;
+            }
+        }
+        draw_column(x, y_hi_capped + 1, SCREEN_SIZE_Y-1, color_ceil);
     }
 }
 
 int main(int argc, char *argv[]) {
+
+    // Load our assets
+    printf("Loading assets...");
+    {
+        FILE* ptr = fopen("assets/assets.bin","rb");
+        ASSERT(ptr, "Error opening assets file\n");
+
+        // Skip the header bytes
+        fseek(ptr, 4, SEEK_CUR);
+        ASSERT(fread(&bitmap.n_pixels,            sizeof(u32), 1, ptr) == 1, "Failed to read n_pixels when loading assets\n");
+        ASSERT(fread(&bitmap.n_pixels_per_column, sizeof(u32), 1, ptr) == 1, "Failed to read n_pixels_per_column when loading assets\n");
+
+        size_t n_bytes_to_alloc = bitmap.n_pixels * sizeof(u32);
+        bitmap.abgr = (u32*) malloc(n_bytes_to_alloc);
+        ASSERT(bitmap.abgr, "Failed to allocate bitmap data\n");
+        ASSERT(fread(bitmap.abgr, sizeof(u32), bitmap.n_pixels, ptr) == bitmap.n_pixels, "Failed to read data when loading assets\n");
+
+        fclose(ptr);
+    }
+    printf("DONE.\n");
+
     // Initialize SDL
     ASSERT(
         SDL_Init(SDL_INIT_VIDEO) == 0,
@@ -545,5 +589,9 @@ int main(int argc, char *argv[]) {
     }
 
     SDL_DestroyWindow(state.window);
+    
+    // Free our assets
+    free(bitmap.abgr);
+
     return 0;
 }
