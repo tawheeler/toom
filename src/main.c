@@ -147,13 +147,11 @@ bool is_pressed(enum KeyboardKeyState state) {
     return lookup[state];
 }
 
-// TODO: Could we store the pixels in column-major? We're always rendering
-//       in vertical lines, so I suspect that would be more efficient.
 struct { 
     SDL_Window *window;
     SDL_Texture *texture;
     SDL_Renderer *renderer;
-    u32 pixels[SCREEN_SIZE_X * SCREEN_SIZE_Y];
+    u32 pixels[SCREEN_SIZE_X * SCREEN_SIZE_Y]; // row-major
     bool quit;
 
     v2 camera_pos;
@@ -168,6 +166,19 @@ struct {
 
     struct KeyBoardState keyboard_state;
 } state;
+
+
+f32 GetElapsedTimeSec(struct timeval* timeval_start, struct timeval* timeval_end) {
+    f32 ms_elapsed = (timeval_end->tv_sec - timeval_start->tv_sec);  // sec
+    ms_elapsed += (timeval_end->tv_usec - timeval_start->tv_usec) / 1000000.0f;   // us to s
+    return ms_elapsed;
+}
+
+f64 GetElapsedTimeMillis(struct timeval* timeval_start, struct timeval* timeval_end) {
+    f64 ms_elapsed = (timeval_end->tv_sec - timeval_start->tv_sec) * 1000.0;  // sec to ms
+    ms_elapsed += (timeval_end->tv_usec - timeval_start->tv_usec) / 1000000.0;   // us to ms
+    return ms_elapsed;
+}
 
 
 static void tick(f32 dt) {
@@ -392,8 +403,6 @@ static void render() {
         int y_lo_capped = max(y_lo, 0);
         int y_hi_capped = min(y_hi, SCREEN_SIZE_Y-1);
 
-        // u32 color_wall_to_render = (dx_ind == 0) ? color_wall[MAPDATA[y_ind*8 + x_ind]-1] : color_wall_light[MAPDATA[y_ind*8 + x_ind]-1];
-
         draw_column(x, 0, y_lo_capped-1, color_floor);
         {
             u32 texture_x_offset = 0;
@@ -411,8 +420,9 @@ static void render() {
             }
             u32 texture_x = (int) (64 * rem / TILE_WIDTH);
             u32 baseline = texture_y_offset + (texture_x+texture_x_offset)*bitmap.n_pixels_per_column;
+            u32 denom = max(1, y_hi - y_lo);
             for (int y = y_hi_capped; y >= y_lo_capped; y--) {
-                u32 texture_y = (y_hi - y) * 64 / max(1, y_hi - y_lo);
+                u32 texture_y = (y_hi - y) * 64 / denom;
                 u32 color = bitmap.abgr[texture_y+baseline];
                 state.pixels[(y * SCREEN_SIZE_X) + x] = color;
             }
@@ -489,14 +499,17 @@ int main(int argc, char *argv[]) {
     clear_keyboard_state(&state.keyboard_state);
 
     // Time structs
-    struct timeval timeval_start, timeval_end;
+    struct timeval timeval_frame_start, timeval_frame_end, timeval_tick, timeval_tick_prev;
+    gettimeofday(&timeval_frame_start, NULL);
+    gettimeofday(&timeval_frame_end, NULL);
+    gettimeofday(&timeval_tick, NULL);
+    gettimeofday(&timeval_tick_prev, NULL);
 
     // Main loop
-    u32 time_prev_tick = SDL_GetTicks();
     state.quit = 0;
     while (state.quit == 0) {
-        const u32 time_start = SDL_GetTicks();
-        gettimeofday(&timeval_start, NULL);
+        // Time of the start of the frame
+        gettimeofday(&timeval_frame_start, NULL);
 
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
@@ -549,20 +562,19 @@ int main(int argc, char *argv[]) {
         }
 
         // TODO: Move to more accurate timing?
-        const u32 time_tick_start = SDL_GetTicks();
-        const f32 dt = (time_tick_start - time_prev_tick) / 1000.0f;
+        gettimeofday(&timeval_tick, NULL);
+        const f32 dt = GetElapsedTimeSec(&timeval_tick_prev, &timeval_tick);
         tick(dt);
-        time_prev_tick = time_tick_start;
+        timeval_tick_prev = timeval_tick;
 
         render();
 
         decay_keyboard_state(&state.keyboard_state);
 
         // Get timer end for all the non-SDL stuff
-        gettimeofday(&timeval_end, NULL);
-        f64 game_ms_elapsed = (timeval_end.tv_sec - timeval_start.tv_sec) * 1000.0;  // sec to ms
-        game_ms_elapsed += (timeval_end.tv_usec - timeval_start.tv_usec) / 1000.0;   // us to ms
-        printf("Game: %.3f ms, %.1f fps\n", game_ms_elapsed, 1000.0f / max(1.0f, game_ms_elapsed));
+        gettimeofday(&timeval_frame_end, NULL);
+        const f64 game_ms_elapsed = GetElapsedTimeMillis(&timeval_frame_start, &timeval_frame_end);
+        printf("Game: %.3f ms, %.1f fps, frame dt %.3fs\n", game_ms_elapsed, 1000.0f / max(1.0f, game_ms_elapsed), dt);
 
         SDL_UpdateTexture(state.texture, NULL, state.pixels, SCREEN_SIZE_X * 4);
         SDL_RenderCopyEx(
@@ -576,11 +588,6 @@ int main(int argc, char *argv[]) {
 
         // SDL_RENDERER_PRESENTVSYNC means this is syncronized with the monitor refresh rate. (30Hz)
         SDL_RenderPresent(state.renderer);
-
-        const u32 time_end = SDL_GetTicks();
-        const u32 ms_elapsed = time_end - time_start;
-        const f32 fps = 1000.0f / max(1, ms_elapsed);
-        printf("FPS: %.1f\n", fps);
     }
 
     SDL_DestroyWindow(state.window);
