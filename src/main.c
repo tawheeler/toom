@@ -26,8 +26,9 @@ typedef ssize_t isize;
 #define TILE_WIDTH 1.0f
 #define WALL_HEIGHT 1.0f
 
+#define TEXTURE_SIZE 64
+
 typedef struct v2_s {f32 x, y;} v2;
-typedef struct v2i_s { i32 x, y;} v2i;
 
 #define dot(v0, v1) \
     ({ const v2 _v0 = (v0), _v1 = (v1); (_v0.x * _v1.x) + (_v0.y * _v1.y); })
@@ -41,15 +42,17 @@ typedef struct v2i_s { i32 x, y;} v2i;
 #define min(a, b) ({ __typeof__(a) _a = (a), _b = (b); _a < _b ? _a : _b; })
 #define max(a, b) ({ __typeof__(a) _a = (a), _b = (b); _a > _b ? _a : _b; })
 
-static u8 MAPDATA[8*8] = {
-    1, 1, 1, 1, 1, 1, 1, 1,
-    1, 0, 0, 0, 0, 0, 0, 1,
-    1, 0, 0, 3, 0, 0, 4, 1,
-    1, 0, 0, 0, 0, 0, 0, 1,
-    1, 0, 0, 0, 0, 0, 4, 1,
-    1, 0, 2, 0, 0, 0, 0, 1,
-    1, 0, 0, 0, 0, 0, 0, 1,
-    1, 1, 1, 1, 1, 1, 1, 1,
+#define MAP_SIZE_X 13
+#define MAP_SIZE_Y 8
+static u8 MAPDATA[MAP_SIZE_X*MAP_SIZE_Y] = {
+    1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 2,
+    1, 0, 0, 0, 0, 0, 0, 1, 2, 0, 0, 0, 2,
+    1, 0, 0, 3, 0, 0, 2, 2, 2, 0, 0, 0, 2,
+    1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
+    1, 0, 0, 0, 0, 0, 2, 2, 2, 0, 0, 0, 2,
+    1, 0, 2, 0, 0, 0, 0, 1, 2, 0, 0, 0, 2,
+    1, 0, 0, 0, 0, 0, 0, 1, 2, 0, 0, 0, 2,
+    1, 1, 1, 1, 1, 1, 1, 1, 2, 3, 3, 3, 2
 };
 
 struct Bitmap {
@@ -181,7 +184,7 @@ f64 GetElapsedTimeMillis(struct timeval* timeval_start, struct timeval* timeval_
 }
 
 
-static void tick(f32 dt) {
+static void Tick(f32 dt) {
 
     v2 input_dir = {0.0, 0.0}; // In the body frame, which is right-handed, so y points left.
     if (is_pressed(state.keyboard_state.w)) {
@@ -232,9 +235,9 @@ static void tick(f32 dt) {
 
     // Update the player's velocity
     const f32 kPlayerInputAccel = 4.5;
-    const f32 kPlayerInputAngularAccel = 7.5;
+    const f32 kPlayerInputAngularAccel = 8.5;
     const f32 kPlayerMaxSpeed = 3.0;
-    const f32 kPlayerMaxOmega = 3.0;
+    const f32 kPlayerMaxOmega = 5.0;
     const f32 kAirFriction = 0.9;
     const f32 kAirFrictionRot = 0.85;
 
@@ -383,7 +386,7 @@ static void render() {
             y_rem += dir.y * dt_best - TILE_WIDTH*dy_ind;
 
             // Check to see if the new cell is solid
-            if (MAPDATA[y_ind*8 + x_ind] > 0) {
+            if (MAPDATA[y_ind*MAP_SIZE_X + x_ind] > 0) {
                 break;
             }
         }
@@ -405,12 +408,9 @@ static void render() {
 
         draw_column(x, 0, y_lo_capped-1, color_floor);
         {
-            u32 texture_x_offset = 0;
-            u32 texture_y_offset = 0;
-            if (dx_ind == 0) {
-                // Draw the light version
-                texture_x_offset = 64;
-            }
+            // Texture x offset determines whether we draw the light or dark version
+            u32 texture_x_offset = dx_ind == 0 ? 0 : TEXTURE_SIZE;
+            u32 texture_y_offset = (MAPDATA[y_ind*MAP_SIZE_X + x_ind] - 1) * TEXTURE_SIZE;
 
             f32 rem = 0.0f;
             if (dx_ind == 0) {
@@ -561,10 +561,10 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        // TODO: Move to more accurate timing?
+        // Calc elapsed time since previous tick, then run tick
         gettimeofday(&timeval_tick, NULL);
         const f32 dt = GetElapsedTimeSec(&timeval_tick_prev, &timeval_tick);
-        tick(dt);
+        Tick(dt);
         timeval_tick_prev = timeval_tick;
 
         render();

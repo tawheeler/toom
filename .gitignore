@@ -4,3 +4,5 @@ obj
 *.aux
 *.pdf
 *.log
+assets/assets.bin
+assets/textures.tif
