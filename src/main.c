@@ -55,6 +55,10 @@ static u8 MAPDATA[MAP_SIZE_X*MAP_SIZE_Y] = {
     1, 1, 1, 1, 1, 1, 1, 1, 2, 3, 3, 3, 2
 };
 
+static inline u8 GetMapDataAt(int x, int y) {
+    return MAPDATA[(MAP_SIZE_Y - y - 1)*MAP_SIZE_X + x];
+}
+
 struct Bitmap {
     u32 n_pixels;
     u32 n_pixels_per_column;
@@ -94,7 +98,7 @@ struct KeyBoardState {
     enum KeyboardKeyState eight;
 };
 
-void clear_keyboard_state(struct KeyBoardState* kbs) {
+void ClearKeyboardState(struct KeyBoardState* kbs) {
     kbs->up = KeyboardKeyState_Depressed;
     kbs->down = KeyboardKeyState_Depressed;
     kbs->right = KeyboardKeyState_Depressed;
@@ -116,7 +120,7 @@ void clear_keyboard_state(struct KeyBoardState* kbs) {
     kbs->eight = KeyboardKeyState_Depressed;
 }
 
-void decay_keyboard_state(struct KeyBoardState* kbs) {
+void DecayKeyboardState(struct KeyBoardState* kbs) {
     static enum KeyboardKeyState to_depressed_state[KeyboardKeyState_COUNT] = {
         KeyboardKeyState_Depressed,
         KeyboardKeyState_Depressed,
@@ -145,7 +149,7 @@ void decay_keyboard_state(struct KeyBoardState* kbs) {
     kbs->eight = to_depressed_state[kbs->eight];
 }
 
-bool is_pressed(enum KeyboardKeyState state) {
+bool IsPressed(enum KeyboardKeyState state) {
     static bool lookup[KeyboardKeyState_COUNT] = {0, 0, 1, 1};
     return lookup[state];
 }
@@ -187,48 +191,48 @@ f64 GetElapsedTimeMillis(struct timeval* timeval_start, struct timeval* timeval_
 static void Tick(f32 dt) {
 
     v2 input_dir = {0.0, 0.0}; // In the body frame, which is right-handed, so y points left.
-    if (is_pressed(state.keyboard_state.w)) {
+    if (IsPressed(state.keyboard_state.w)) {
         input_dir.x += 1.0;
     }
-    if (is_pressed(state.keyboard_state.s)) {
+    if (IsPressed(state.keyboard_state.s)) {
         input_dir.x -= 1.0;
     }
-    if (is_pressed(state.keyboard_state.d)) {
+    if (IsPressed(state.keyboard_state.d)) {
         input_dir.y -= 1.0;
     }
-    if (is_pressed(state.keyboard_state.a)) {
+    if (IsPressed(state.keyboard_state.a)) {
         input_dir.y += 1.0;
     }
 
     int input_rot_dir = 0; // Right-hand rotation in plane (CCW)
-    if (is_pressed(state.keyboard_state.q)) {
+    if (IsPressed(state.keyboard_state.q)) {
         input_rot_dir += 1;
     }
-    if (is_pressed(state.keyboard_state.e)) {
+    if (IsPressed(state.keyboard_state.e)) {
         input_rot_dir -= 1;
     }
 
-    if (is_pressed(state.keyboard_state.three)) {
+    if (IsPressed(state.keyboard_state.three)) {
         state.camera_z *= 0.95;
         printf("camera z: %.3f\n", state.camera_z);
     }
-    if (is_pressed(state.keyboard_state.four)) {
+    if (IsPressed(state.keyboard_state.four)) {
         state.camera_z /= 0.95;
         printf("camera z: %.3f\n", state.camera_z);
     }
-    if (is_pressed(state.keyboard_state.five)) {
+    if (IsPressed(state.keyboard_state.five)) {
         state.camera_height *= 0.95;
         printf("camera height: %.3f\n", state.camera_height);
     }
-    if (is_pressed(state.keyboard_state.six)) {
+    if (IsPressed(state.keyboard_state.six)) {
         state.camera_height /= 0.95;
         printf("camera height: %.3f\n", state.camera_height);
     }
-    if (is_pressed(state.keyboard_state.seven)) {
+    if (IsPressed(state.keyboard_state.seven)) {
         state.camera_width *= 0.95;
         printf("camera width: %.3f\n", state.camera_width);
     }
-    if (is_pressed(state.keyboard_state.eight)) {
+    if (IsPressed(state.keyboard_state.eight)) {
         state.camera_width /= 0.95;
         printf("camera width: %.3f\n", state.camera_width);
     }
@@ -276,13 +280,13 @@ static void Tick(f32 dt) {
 
 
 // Fill all pixels in the vertical line at x between y0 and y1 with the given color.
-static void draw_column(int x, int y0, int y1, u32 color) {
+static void DrawColumn(int x, int y0, int y1, u32 color) {
     for (int y = y0; y <= y1; y++) {
         state.pixels[(y * SCREEN_SIZE_X) + x] = color;
     }
 }
 
-static void render() {
+static void Render() {
     const u32 color_floor = 0xFF666666;
     const u32 color_ceil = 0xFF444444;
 
@@ -386,7 +390,7 @@ static void render() {
             y_rem += dir.y * dt_best - TILE_WIDTH*dy_ind;
 
             // Check to see if the new cell is solid
-            if (MAPDATA[y_ind*MAP_SIZE_X + x_ind] > 0) {
+            if (GetMapDataAt(x_ind,y_ind) > 0) {
                 break;
             }
         }
@@ -406,11 +410,11 @@ static void render() {
         int y_lo_capped = max(y_lo, 0);
         int y_hi_capped = min(y_hi, SCREEN_SIZE_Y-1);
 
-        draw_column(x, 0, y_lo_capped-1, color_floor);
+        DrawColumn(x, 0, y_lo_capped-1, color_floor);
         {
             // Texture x offset determines whether we draw the light or dark version
             u32 texture_x_offset = dx_ind == 0 ? 0 : TEXTURE_SIZE;
-            u32 texture_y_offset = (MAPDATA[y_ind*MAP_SIZE_X + x_ind] - 1) * TEXTURE_SIZE;
+            u32 texture_y_offset = (GetMapDataAt(x_ind,y_ind) - 1) * TEXTURE_SIZE;
 
             f32 rem = 0.0f;
             if (dx_ind == 0) {
@@ -427,7 +431,7 @@ static void render() {
                 state.pixels[(y * SCREEN_SIZE_X) + x] = color;
             }
         }
-        draw_column(x, y_hi_capped + 1, SCREEN_SIZE_Y-1, color_ceil);
+        DrawColumn(x, y_hi_capped + 1, SCREEN_SIZE_Y-1, color_ceil);
     }
 }
 
@@ -496,7 +500,7 @@ int main(int argc, char *argv[]) {
     state.player_omega = 0.0f;
 
     // Init keyboard
-    clear_keyboard_state(&state.keyboard_state);
+    ClearKeyboardState(&state.keyboard_state);
 
     // Time structs
     struct timeval timeval_frame_start, timeval_frame_end, timeval_tick, timeval_tick_prev;
@@ -567,9 +571,9 @@ int main(int argc, char *argv[]) {
         Tick(dt);
         timeval_tick_prev = timeval_tick;
 
-        render();
+        Render();
 
-        decay_keyboard_state(&state.keyboard_state);
+        DecayKeyboardState(&state.keyboard_state);
 
         // Get timer end for all the non-SDL stuff
         gettimeofday(&timeval_frame_end, NULL);
