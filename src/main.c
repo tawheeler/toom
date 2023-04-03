@@ -193,7 +193,7 @@ f32 GetElapsedTimeSec(struct timeval* timeval_start, struct timeval* timeval_end
 
 f64 GetElapsedTimeMillis(struct timeval* timeval_start, struct timeval* timeval_end) {
     f64 ms_elapsed = (timeval_end->tv_sec - timeval_start->tv_sec) * 1000.0;  // sec to ms
-    ms_elapsed += (timeval_end->tv_usec - timeval_start->tv_usec) / 1000000.0;   // us to ms
+    ms_elapsed += (timeval_end->tv_usec - timeval_start->tv_usec) / 1000.0;   // us to ms
     return ms_elapsed;
 }
 
@@ -297,12 +297,8 @@ static void DrawColumn(int x, int y0, int y1, u32 color) {
 }
 
 static void Render() {
-    const u32 color_floor = 0xFF666666;
-
     // Render the ceiling texture across the top half.
     {
-        u32 texture_x_offset = 0;
-        u32 texture_y_offset = 0;
 
         // Ray direction for x = 0
         f32 half_camera_width = state.camera_width/2.0f;
@@ -313,11 +309,13 @@ static void Render() {
         f32 ray_dir_hi_x = state.camera_dir.x - half_camera_width*state.camera_dir_rotr.x;
         f32 ray_dir_hi_y = state.camera_dir.y - half_camera_width*state.camera_dir_rotr.y;        
 
-        // Scan horizontally, since it is more efficient.
-        for (int y = SCREEN_SIZE_Y/2 + 1; y < SCREEN_SIZE_Y; y++) {
+        // Draw floor
+        u32 texture_x_offset = 0;
+        u32 texture_y_offset = 0;
+        for (int y = 0; y < SCREEN_SIZE_Y/2; y++) {
             // Radius
-            f32 zpp = (y - (SCREEN_SIZE_Y/2.0f)) * (state.camera_height / SCREEN_SIZE_Y);
-            f32 radius = (WALL_HEIGHT - state.camera_z)/zpp;
+            f32 zpp = (SCREEN_SIZE_Y/2.0f - y) * (state.camera_height / SCREEN_SIZE_Y);
+            f32 radius = state.camera_z/zpp;
 
             // Location of the 1st ray's intersection
             f32 hit_x = state.camera_pos.x + radius * ray_dir_lo_x;
@@ -336,8 +334,33 @@ static void Render() {
                 u32 color = BITMAP_FLOOR.abgr[texture_y+texture_y_offset + (texture_x+texture_x_offset)*BITMAP_FLOOR.n_pixels_per_column];
                 state.pixels[(y * SCREEN_SIZE_X) + x] = color;
 
-                // Floor is NOT symmetric (due to player height)
-                state.pixels[(SCREEN_SIZE_Y - y - 1) * SCREEN_SIZE_X + x] = color_floor;
+                // step
+                hit_x += step_x;
+                hit_y += step_y;
+            }
+        }
+
+        // Draw ceiling
+        texture_x_offset = 0;
+        texture_y_offset = 0;
+        for (int y = SCREEN_SIZE_Y/2 + 1; y < SCREEN_SIZE_Y; y++) {
+            // Radius
+            f32 zpp = (y - (SCREEN_SIZE_Y/2.0f)) * (state.camera_height / SCREEN_SIZE_Y);
+            f32 radius = (WALL_HEIGHT - state.camera_z)/zpp;
+
+            // Location of the 1st ray's intersection
+            f32 hit_x = state.camera_pos.x + radius * ray_dir_lo_x;
+            f32 hit_y = state.camera_pos.y + radius * ray_dir_lo_y;
+
+            // Each step toward hit2
+            f32 step_x = radius * (ray_dir_hi_x - ray_dir_lo_x) / SCREEN_SIZE_X;
+            f32 step_y = radius * (ray_dir_hi_y - ray_dir_lo_y) / SCREEN_SIZE_X;
+
+            for (int x = 0; x < SCREEN_SIZE_X; x++) {
+                u32 texture_x = (int)(fmod(hit_x, TILE_WIDTH)/TILE_WIDTH * TEXTURE_SIZE) & (TEXTURE_SIZE - 1);
+                u32 texture_y = (int)(fmod(hit_y, TILE_WIDTH)/TILE_WIDTH * TEXTURE_SIZE) & (TEXTURE_SIZE - 1);
+                u32 color = BITMAP_FLOOR.abgr[texture_y+texture_y_offset + (texture_x+texture_x_offset)*BITMAP_FLOOR.n_pixels_per_column];
+                state.pixels[(y * SCREEN_SIZE_X) + x] = color;
 
                 // step
                 hit_x += step_x;
