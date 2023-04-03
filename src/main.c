@@ -298,7 +298,69 @@ static void DrawColumn(int x, int y0, int y1, u32 color) {
 
 static void Render() {
     const u32 color_floor = 0xFF666666;
-    const u32 color_ceil = 0xFF444444;
+
+    // Render the ceiling texture across the top half.
+    {
+        u32 texture_x_offset = 0;
+        u32 texture_y_offset = 0;
+
+        // Ray direction for x = 0
+        f32 half_camera_width = state.camera_width/2.0f;
+        f32 ray_dir_lo_x = state.camera_dir.x + half_camera_width*state.camera_dir_rotr.x;
+        f32 ray_dir_lo_y = state.camera_dir.y + half_camera_width*state.camera_dir_rotr.y;
+
+        // Ray direction for x = SCREEN_SIZE_X
+        f32 ray_dir_hi_x = state.camera_dir.x - half_camera_width*state.camera_dir_rotr.x;
+        f32 ray_dir_hi_y = state.camera_dir.y - half_camera_width*state.camera_dir_rotr.y;        
+
+        // Scan horizontally, since it is more efficient.
+        for (int y = SCREEN_SIZE_Y/2 + 1; y < SCREEN_SIZE_Y; y++) {
+            // Radius
+            f32 zpp = (y - (SCREEN_SIZE_Y/2.0f)) * (state.camera_height / SCREEN_SIZE_Y);
+            f32 radius = (WALL_HEIGHT - state.camera_z)/zpp;
+
+            // Location of the 1st ray's intersection
+            f32 hit_x = state.camera_pos.x + radius * ray_dir_lo_x;
+            f32 hit_y = state.camera_pos.y + radius * ray_dir_lo_y;
+
+            // Each step is (hit_x2 - hit_x) / SCREEN_SIZE_X;
+            // = ((state.camera_pos.x + radius * ray_dir_lo_x) - (state.camera_pos.x + radius * ray_dir_lo_x)) / SCREEN_SIZE_X
+            // = (radius * ray_dir_lo_x - (radius * ray_dir_lo_x)) / SCREEN_SIZE_X
+            // = radius * (ray_dir_hi_x - ray_dir_lo_x) / SCREEN_SIZE_X
+            f32 step_x = radius * (ray_dir_hi_x - ray_dir_lo_x) / SCREEN_SIZE_X;
+            f32 step_y = radius * (ray_dir_hi_y - ray_dir_lo_y) / SCREEN_SIZE_X;
+
+            for (int x = 0; x < SCREEN_SIZE_X; x++) {
+                u32 texture_x = (int)(fmod(hit_x, TILE_WIDTH)/TILE_WIDTH * TEXTURE_SIZE) & (TEXTURE_SIZE - 1);
+                u32 texture_y = (int)(fmod(hit_y, TILE_WIDTH)/TILE_WIDTH * TEXTURE_SIZE) & (TEXTURE_SIZE - 1);
+                u32 color = BITMAP_FLOOR.abgr[texture_y+texture_y_offset + (texture_x+texture_x_offset)*BITMAP_FLOOR.n_pixels_per_column];
+                state.pixels[(y * SCREEN_SIZE_X) + x] = color;
+
+                // Floor is NOT symmetric (due to player height)
+                state.pixels[(SCREEN_SIZE_Y - y - 1) * SCREEN_SIZE_X + x] = color_floor;
+
+                // step
+                hit_x += step_x;
+                hit_y += step_y;
+            }
+        }
+
+        // ORIGINAL CODE
+        // f32 x_side_frac = (x - SCREEN_SIZE_X/2.0f) / SCREEN_SIZE_X * state.camera_width; 
+        // f32 xpp = sqrt(1.0f + x_side_frac*x_side_frac);
+        // for (int y = y_hi_capped + 1; y < SCREEN_SIZE_Y; y++) {
+        //     if (y > SCREEN_SIZE_Y/2.0f) {
+        //         // NOTE: zpp is only positive if y > SCREEN_SIZE_Y/2
+        //         f32 zpp = (y - (SCREEN_SIZE_Y/2.0f)) * (state.camera_height / SCREEN_SIZE_Y);
+        //         f32 r = (WALL_HEIGHT - state.camera_z)*xpp/zpp;
+        //         u32 texture_x = (int)(fmod(state.camera_pos.x + r*dir.x, TILE_WIDTH)/TILE_WIDTH * TEXTURE_SIZE);
+        //         u32 texture_y = (int)(fmod(state.camera_pos.y + r*dir.y, TILE_WIDTH)/TILE_WIDTH * TEXTURE_SIZE);
+        //         u32 color = BITMAP_FLOOR.abgr[texture_y+texture_y_offset + (texture_x+texture_x_offset)*BITMAP_FLOOR.n_pixels_per_column];
+        //         state.pixels[(y * SCREEN_SIZE_X) + x] = color;
+        //     }
+        // }
+    }
+
 
     // Get camera location's cell coordinates
     int x_ind_cam = (int)(floorf(state.camera_pos.x / TILE_WIDTH));
@@ -420,7 +482,7 @@ static void Render() {
         int y_lo_capped = max(y_lo, 0);
         int y_hi_capped = min(y_hi, SCREEN_SIZE_Y-1);
 
-        DrawColumn(x, 0, y_lo_capped-1, color_floor);
+        // DrawColumn(x, 0, y_lo_capped-1, color_floor);
         {
             // Texture x offset determines whether we draw the light or dark version
             u32 texture_x_offset = dx_ind == 0 ? 0 : TEXTURE_SIZE;
@@ -442,25 +504,6 @@ static void Render() {
             }
         }
         // DrawColumn(x, y_hi_capped + 1, SCREEN_SIZE_Y-1, color_ceil);
-        {
-            u32 texture_x_offset = 0;
-            u32 texture_y_offset = 0;
-
-            // TODO: Scan horizontally, since it is more efficient.
-            f32 x_side_frac = (x - SCREEN_SIZE_X/2.0f) / SCREEN_SIZE_X * state.camera_width; 
-            f32 rpp = sqrt(1.0f + x_side_frac*x_side_frac);
-            for (int y = y_hi_capped + 1; y < SCREEN_SIZE_Y; y++) {
-                if (y > SCREEN_SIZE_Y/2.0f) {
-                    // NOTE: zpp is only positive if y > SCREEN_SIZE_Y/2
-                    f32 zpp = (y - (SCREEN_SIZE_Y/2.0f)) * (state.camera_height / SCREEN_SIZE_Y);
-                    f32 r = (WALL_HEIGHT - state.camera_z)*rpp/zpp;
-                    u32 texture_x = (int)(fmod(state.camera_pos.x + r*dir.x, TILE_WIDTH)/TILE_WIDTH * TEXTURE_SIZE);
-                    u32 texture_y = (int)(fmod(state.camera_pos.y + r*dir.y, TILE_WIDTH)/TILE_WIDTH * TEXTURE_SIZE);
-                    u32 color = BITMAP_FLOOR.abgr[texture_y+texture_y_offset + (texture_x+texture_x_offset)*BITMAP_FLOOR.n_pixels_per_column];
-                    state.pixels[(y * SCREEN_SIZE_X) + x] = color;
-                }
-            }
-        }
     }
 }
 
