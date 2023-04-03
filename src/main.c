@@ -76,7 +76,7 @@ struct Bitmap {
 
 // The bitmap global variables. These just point into the binary blob.
 struct Bitmap BITMAP_WALL;
-struct Bitmap BITMAP_TEXTURE;
+struct Bitmap BITMAP_FLOOR;
 
 enum KeyboardKeyState {
     KeyboardKeyState_Depressed = 0, // No recent event, key is still up
@@ -319,7 +319,7 @@ static void Render() {
         const f32 cam_len = length( (cp) );
         
         // Ray direction through this column
-        const v2 dir = {cp.x / cam_len, cp.y  /cam_len};
+        const v2 dir = {cp.x / cam_len, cp.y / cam_len};
 
         // Start at the camera pos
         int x_ind = x_ind_cam;
@@ -432,16 +432,35 @@ static void Render() {
             } else {
                 rem = dx_ind < 0 ? y_rem : TILE_WIDTH - y_rem;
             }
-            u32 texture_x = (int) (64 * rem / TILE_WIDTH);
+            u32 texture_x = (int) (TEXTURE_SIZE * rem / TILE_WIDTH);
             u32 baseline = texture_y_offset + (texture_x+texture_x_offset)*BITMAP_WALL.n_pixels_per_column;
             u32 denom = max(1, y_hi - y_lo);
             for (int y = y_hi_capped; y >= y_lo_capped; y--) {
-                u32 texture_y = (y_hi - y) * 64 / denom;
+                u32 texture_y = (y_hi - y) * TEXTURE_SIZE / denom;
                 u32 color = BITMAP_WALL.abgr[texture_y+baseline];
                 state.pixels[(y * SCREEN_SIZE_X) + x] = color;
             }
         }
-        DrawColumn(x, y_hi_capped + 1, SCREEN_SIZE_Y-1, color_ceil);
+        // DrawColumn(x, y_hi_capped + 1, SCREEN_SIZE_Y-1, color_ceil);
+        {
+            u32 texture_x_offset = 0;
+            u32 texture_y_offset = 0;
+
+            // TODO: Scan horizontally, since it is more efficient.
+            f32 x_side_frac = (x - SCREEN_SIZE_X/2.0f) / SCREEN_SIZE_X * state.camera_width; 
+            f32 rpp = sqrt(1.0f + x_side_frac*x_side_frac);
+            for (int y = y_hi_capped + 1; y < SCREEN_SIZE_Y; y++) {
+                if (y > SCREEN_SIZE_Y/2.0f) {
+                    // NOTE: zpp is only positive if y > SCREEN_SIZE_Y/2
+                    f32 zpp = (y - (SCREEN_SIZE_Y/2.0f)) * (state.camera_height / SCREEN_SIZE_Y);
+                    f32 r = (WALL_HEIGHT - state.camera_z)*rpp/zpp;
+                    u32 texture_x = (int)(fmod(state.camera_pos.x + r*dir.x, TILE_WIDTH)/TILE_WIDTH * TEXTURE_SIZE);
+                    u32 texture_y = (int)(fmod(state.camera_pos.y + r*dir.y, TILE_WIDTH)/TILE_WIDTH * TEXTURE_SIZE);
+                    u32 color = BITMAP_FLOOR.abgr[texture_y+texture_y_offset + (texture_x+texture_x_offset)*BITMAP_FLOOR.n_pixels_per_column];
+                    state.pixels[(y * SCREEN_SIZE_X) + x] = color;
+                }
+            }
+        }
     }
 }
 
@@ -503,11 +522,11 @@ int main(int argc, char *argv[]) {
                 BITMAP_WALL.abgr = (u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
             } else if (strcmp(entry->name, "floor_texture") == 0) {
                 u32 asset_byte_offset = entry->byte_offset;
-                BITMAP_TEXTURE.n_pixels            = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
+                BITMAP_FLOOR.n_pixels            = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
                 asset_byte_offset += sizeof(u32);
-                BITMAP_TEXTURE.n_pixels_per_column = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
+                BITMAP_FLOOR.n_pixels_per_column = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
                 asset_byte_offset += sizeof(u32);
-                BITMAP_TEXTURE.abgr = (u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
+                BITMAP_FLOOR.abgr = (u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
             }
         }
     }
