@@ -59,14 +59,24 @@ static inline u8 GetMapDataAt(int x, int y) {
     return MAPDATA[(MAP_SIZE_Y - y - 1)*MAP_SIZE_X + x];
 }
 
+// Big binary assets blob that we load at init.
+u8* ASSETS_BINARY_BLOB = NULL;
+u32 ASSETS_BINARY_BLOB_SIZE = 0; // number of bytes
+
+struct BinaryAssetTableOfContentEntry {
+    u32 byte_offset;
+    char name[16];  
+};
+
 struct Bitmap {
     u32 n_pixels;
     u32 n_pixels_per_column;
     u32* abgr; // pixel x, y is at abgr[y + x*n_pixels_per_column]
 };
 
-// The global variable of our main bitmap.
-struct Bitmap bitmap;
+// The bitmap global variables. These just point into the binary blob.
+struct Bitmap BITMAP_WALL;
+struct Bitmap BITMAP_TEXTURE;
 
 enum KeyboardKeyState {
     KeyboardKeyState_Depressed = 0, // No recent event, key is still up
@@ -423,11 +433,11 @@ static void Render() {
                 rem = dx_ind < 0 ? y_rem : TILE_WIDTH - y_rem;
             }
             u32 texture_x = (int) (64 * rem / TILE_WIDTH);
-            u32 baseline = texture_y_offset + (texture_x+texture_x_offset)*bitmap.n_pixels_per_column;
+            u32 baseline = texture_y_offset + (texture_x+texture_x_offset)*BITMAP_WALL.n_pixels_per_column;
             u32 denom = max(1, y_hi - y_lo);
             for (int y = y_hi_capped; y >= y_lo_capped; y--) {
                 u32 texture_y = (y_hi - y) * 64 / denom;
-                u32 color = bitmap.abgr[texture_y+baseline];
+                u32 color = BITMAP_WALL.abgr[texture_y+baseline];
                 state.pixels[(y * SCREEN_SIZE_X) + x] = color;
             }
         }
@@ -438,22 +448,68 @@ static void Render() {
 int main(int argc, char *argv[]) {
 
     // Load our assets
-    printf("Loading assets...");
+    printf("Loading assets.\n");
     {
-        FILE* ptr = fopen("assets/assets.bin","rb");
-        ASSERT(ptr, "Error opening assets file\n");
+        // The format is:
+        // HEADER:
+        //    "TOOM"   - 4 chars
+        // Data:
+        //   necessary data, laid out as needed.
+        // Table of Contents:
+        //   array of table of content entries:
+        //      u32       offset in file # number of bytes past 'TOOM' to read at. First entry will have offset 0
+        //      char[16]  name           # null-terminated string label, e.g. "floor_textures"
+        //   u32 n_toc_entries = number of table of content entries
 
-        // Skip the header bytes
-        fseek(ptr, 4, SEEK_CUR);
-        ASSERT(fread(&bitmap.n_pixels,            sizeof(u32), 1, ptr) == 1, "Failed to read n_pixels when loading assets\n");
-        ASSERT(fread(&bitmap.n_pixels_per_column, sizeof(u32), 1, ptr) == 1, "Failed to read n_pixels_per_column when loading assets\n");
+        FILE* fileptr = fopen("assets/assets.bin","rb");
+        ASSERT(fileptr, "Error opening assets file\n");
+        
+        // Count the number of bytes
+        fseek(fileptr, 0, SEEK_END);
+        u32 n_bytes_in_file = ftell(fileptr);
+        ASSETS_BINARY_BLOB_SIZE = n_bytes_in_file - 4; // Everything past the 'TOOM' header
+        
+        // Read in the binary assets as a single blob
+        fseek(fileptr, 4, SEEK_SET); // Skip the header bytes
+        ASSETS_BINARY_BLOB = (u8*) malloc(ASSETS_BINARY_BLOB_SIZE);
+        ASSERT(ASSETS_BINARY_BLOB, "Failed to allocate assets blob\n");
+        ASSERT(fread(ASSETS_BINARY_BLOB, sizeof(u8), ASSETS_BINARY_BLOB_SIZE, fileptr) == ASSETS_BINARY_BLOB_SIZE, "Failed to read assets blob when loading assets\n");
 
-        size_t n_bytes_to_alloc = bitmap.n_pixels * sizeof(u32);
-        bitmap.abgr = (u32*) malloc(n_bytes_to_alloc);
-        ASSERT(bitmap.abgr, "Failed to allocate bitmap data\n");
-        ASSERT(fread(bitmap.abgr, sizeof(u32), bitmap.n_pixels, ptr) == bitmap.n_pixels, "Failed to read data when loading assets\n");
+        fclose(fileptr);
+    }
+    {
+        // Process the loaded assets from the loaded binary blob
 
-        fclose(ptr);
+        // Read the number of table of content entries
+        u32 byte_index = ASSETS_BINARY_BLOB_SIZE - sizeof(u32);
+        u32 n_toc_entries = *(u32*)(ASSETS_BINARY_BLOB + byte_index);
+        ASSERT(ASSETS_BINARY_BLOB_SIZE > sizeof(struct BinaryAssetTableOfContentEntry) * n_toc_entries + 4, "Number of table of content entries is impossible given the number of bytes\n");
+
+        // Scan through them in reverse order
+        for (int i = n_toc_entries; i > 0; i--) {
+            byte_index -= sizeof(struct BinaryAssetTableOfContentEntry);
+            struct BinaryAssetTableOfContentEntry* entry = (struct BinaryAssetTableOfContentEntry*)(ASSETS_BINARY_BLOB + byte_index);
+            // Make the name null-terminated just in case.
+            entry->name[15] = '\0';
+            printf("Entry %d: %s at offset %d\n", i, entry->name, entry->byte_offset);
+
+            // In the future, load them into a map or something. For now, we're specifically looking for either the wall or floor textures.
+            if (strcmp(entry->name, "wall_texture") == 0) {
+                u32 asset_byte_offset = entry->byte_offset;
+                BITMAP_WALL.n_pixels            = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
+                asset_byte_offset += sizeof(u32);
+                BITMAP_WALL.n_pixels_per_column = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
+                asset_byte_offset += sizeof(u32);
+                BITMAP_WALL.abgr = (u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
+            } else if (strcmp(entry->name, "floor_texture") == 0) {
+                u32 asset_byte_offset = entry->byte_offset;
+                BITMAP_TEXTURE.n_pixels            = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
+                asset_byte_offset += sizeof(u32);
+                BITMAP_TEXTURE.n_pixels_per_column = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
+                asset_byte_offset += sizeof(u32);
+                BITMAP_TEXTURE.abgr = (u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
+            }
+        }
     }
     printf("DONE.\n");
 
@@ -597,7 +653,7 @@ int main(int argc, char *argv[]) {
     SDL_DestroyWindow(state.window);
     
     // Free our assets
-    free(bitmap.abgr);
+    free(ASSETS_BINARY_BLOB);
 
     return 0;
 }

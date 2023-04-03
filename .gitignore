@@ -6,3 +6,4 @@ obj
 *.log
 assets/assets.bin
 assets/textures.tif
+assets/floor_textures.tif
