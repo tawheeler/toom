@@ -69,14 +69,29 @@ struct BinaryAssetTableOfContentEntry {
 };
 
 struct Bitmap {
-    u32 n_pixels;
-    u32 n_pixels_per_column;
+    u32  n_pixels;
+    u32  n_pixels_per_column;
+    u32  n_pixels_per_row;
+    bool column_major;
     u32* abgr; // pixel x, y is at abgr[y + x*n_pixels_per_column]
 };
 
 // The bitmap global variables. These just point into the binary blob.
 struct Bitmap BITMAP_WALL;
 struct Bitmap BITMAP_FLOOR;
+
+static inline int GetColumnMajorPixelIndex(struct Bitmap* bitmap, int x, int y) {
+    return y + x*bitmap->n_pixels_per_column;
+}
+static inline int GetRowMajorPixelIndex(struct Bitmap* bitmap, int x, int y) {
+    return x + y*bitmap->n_pixels_per_row;
+}
+static inline u32 GetColumnMajorPixelAt(struct Bitmap* bitmap, int x, int y) {
+    return bitmap->abgr[y + x*bitmap->n_pixels_per_column];
+}
+static inline u32 GetRowMajorPixelAt(struct Bitmap* bitmap, int x, int y) {
+    return bitmap->abgr[x + y*bitmap->n_pixels_per_row];
+}
 
 enum KeyboardKeyState {
     KeyboardKeyState_Depressed = 0, // No recent event, key is still up
@@ -331,7 +346,7 @@ static void Render() {
             for (int x = 0; x < SCREEN_SIZE_X; x++) {
                 u32 texture_x = (int)(fmod(hit_x, TILE_WIDTH)/TILE_WIDTH * TEXTURE_SIZE) & (TEXTURE_SIZE - 1);
                 u32 texture_y = (int)(fmod(hit_y, TILE_WIDTH)/TILE_WIDTH * TEXTURE_SIZE) & (TEXTURE_SIZE - 1);
-                u32 color = BITMAP_FLOOR.abgr[texture_y+texture_y_offset + (texture_x+texture_x_offset)*BITMAP_FLOOR.n_pixels_per_column];
+                u32 color = GetRowMajorPixelAt(&BITMAP_FLOOR, texture_x+texture_x_offset, texture_y+texture_y_offset);
                 state.pixels[(y * SCREEN_SIZE_X) + x] = color;
 
                 // step
@@ -359,7 +374,7 @@ static void Render() {
             for (int x = 0; x < SCREEN_SIZE_X; x++) {
                 u32 texture_x = (int)(fmod(hit_x, TILE_WIDTH)/TILE_WIDTH * TEXTURE_SIZE) & (TEXTURE_SIZE - 1);
                 u32 texture_y = (int)(fmod(hit_y, TILE_WIDTH)/TILE_WIDTH * TEXTURE_SIZE) & (TEXTURE_SIZE - 1);
-                u32 color = BITMAP_FLOOR.abgr[texture_y+texture_y_offset + (texture_x+texture_x_offset)*BITMAP_FLOOR.n_pixels_per_column];
+                u32 color = GetRowMajorPixelAt(&BITMAP_FLOOR, texture_x+texture_x_offset, texture_y+texture_y_offset);
                 state.pixels[(y * SCREEN_SIZE_X) + x] = color;
 
                 // step
@@ -518,7 +533,7 @@ static void Render() {
                 rem = dx_ind < 0 ? y_rem : TILE_WIDTH - y_rem;
             }
             u32 texture_x = (int) (TEXTURE_SIZE * rem / TILE_WIDTH);
-            u32 baseline = texture_y_offset + (texture_x+texture_x_offset)*BITMAP_WALL.n_pixels_per_column;
+            u32 baseline = GetColumnMajorPixelIndex(&BITMAP_WALL, texture_x+texture_x_offset, texture_y_offset);
             u32 denom = max(1, y_hi - y_lo);
             for (int y = y_hi_capped; y >= y_lo_capped; y--) {
                 u32 texture_y = (y_hi - y) * TEXTURE_SIZE / denom;
@@ -585,14 +600,22 @@ int main(int argc, char *argv[]) {
                 asset_byte_offset += sizeof(u32);
                 BITMAP_WALL.n_pixels_per_column = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
                 asset_byte_offset += sizeof(u32);
+                BITMAP_WALL.column_major = ASSETS_BINARY_BLOB[asset_byte_offset];
+                ASSERT(BITMAP_WALL.column_major, "Expected the wall texture to be column-major");
+                asset_byte_offset += sizeof(u8);
                 BITMAP_WALL.abgr = (u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
+                BITMAP_WALL.n_pixels_per_row = BITMAP_WALL.n_pixels / BITMAP_WALL.n_pixels_per_column;
             } else if (strcmp(entry->name, "floor_texture") == 0) {
                 u32 asset_byte_offset = entry->byte_offset;
                 BITMAP_FLOOR.n_pixels            = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
                 asset_byte_offset += sizeof(u32);
                 BITMAP_FLOOR.n_pixels_per_column = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
                 asset_byte_offset += sizeof(u32);
+                BITMAP_FLOOR.column_major = ASSETS_BINARY_BLOB[asset_byte_offset];
+                ASSERT(!BITMAP_FLOOR.column_major, "Expected the floor texture to be row-major");
+                asset_byte_offset += sizeof(u8);
                 BITMAP_FLOOR.abgr = (u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
+                BITMAP_FLOOR.n_pixels_per_row = BITMAP_FLOOR.n_pixels / BITMAP_FLOOR.n_pixels_per_column;
             }
         }
     }
@@ -707,6 +730,7 @@ int main(int argc, char *argv[]) {
         }
 
         // Calc elapsed time since previous tick, then run tick
+        // TODO: Something is wrong here, since we run much slower with the other monitor.
         gettimeofday(&timeval_tick, NULL);
         const f32 dt = GetElapsedTimeSec(&timeval_tick_prev, &timeval_tick);
         Tick(dt);

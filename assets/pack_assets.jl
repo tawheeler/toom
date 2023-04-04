@@ -22,7 +22,7 @@ struct TableOfContentsEntry
 	offset_in_file::UInt32
 end
 
-function write_image(img, output::IOStream)::UInt32
+function write_image(img, output::IOStream; column_major::Bool=true)::UInt32
 	n_bytes_written = zero(UInt32)
 
 	# Write the number of pixels as a UInt32
@@ -35,14 +35,32 @@ function write_image(img, output::IOStream)::UInt32
 	write(output, n_pix_per_column::UInt32)
 	n_bytes_written += 4
 
+	# Write whether the pixels are in column major order
+	write(output, UInt8(column_major))
+	n_bytes_written += 1
+
 	# Write the image top to bottom and left to right, as ABGR little endian
-	for col in 1:size(img)[2]
+	if column_major
+		# a11, a21, a31, a12, a22, a32, a31, a23, a33
+		for col in 1:size(img)[2]
+			for row in 1:n_pix_per_column
+				write(output, (img[row, col].r.i)::UInt8)
+				write(output, (img[row, col].g.i)::UInt8)
+				write(output, (img[row, col].b.i)::UInt8)
+				write(output, 0xFF);
+				n_bytes_written += 4
+			end
+		end
+	else
+		# a11, a12, a13, a21, a22, a23, a31, a32, a33
 		for row in 1:n_pix_per_column
-			write(output, (img[row, col].r.i)::UInt8)
-			write(output, (img[row, col].g.i)::UInt8)
-			write(output, (img[row, col].b.i)::UInt8)
-			write(output, 0xFF);
-			n_bytes_written += 4
+			for col in 1:size(img)[2]
+				write(output, (img[row, col].r.i)::UInt8)
+				write(output, (img[row, col].g.i)::UInt8)
+				write(output, (img[row, col].b.i)::UInt8)
+				write(output, 0xFF);
+				n_bytes_written += 4
+			end
 		end
 	end
 
@@ -67,13 +85,13 @@ open(output_file, "w") do output
 		"wall_textures",
 		offset_in_file
 	))
-	offset_in_file += write_image(wall_textures, output)
+	offset_in_file += write_image(wall_textures, output, column_major=true)
 
 	push!(table_of_contents_entries, TableOfContentsEntry(
 		"floor_textures",
 		offset_in_file
 	))
-	offset_in_file += write_image(floor_textures, output)
+	offset_in_file += write_image(floor_textures, output, column_major=false)
 
 	# WRITE TABLE OF CONTENTS -----------------------------
 
