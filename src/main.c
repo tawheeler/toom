@@ -721,7 +721,6 @@ int main(int argc, char *argv[]) {
         }
 
         // Calc elapsed time since previous tick, then run tick
-        // TODO: Something is wrong here, since we run much slower with the other monitor.
         gettimeofday(&timeval_tick, NULL);
         const f32 dt = GetElapsedTimeSec(&timeval_tick_prev, &timeval_tick);
         Tick(dt);
