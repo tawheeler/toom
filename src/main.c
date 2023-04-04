@@ -263,12 +263,12 @@ static void Tick(f32 dt) {
     }
 
     // Update the player's velocity
-    const f32 kPlayerInputAccel = 4.5;
+    const f32 kPlayerInputAccel = 5.5;
     const f32 kPlayerInputAngularAccel = 8.5;
-    const f32 kPlayerMaxSpeed = 3.0;
+    const f32 kPlayerMaxSpeed = 4.0;
     const f32 kPlayerMaxOmega = 5.0;
-    const f32 kAirFriction = 0.9;
-    const f32 kAirFrictionRot = 0.85;
+    const f32 kAirFriction = 4.0;
+    const f32 kAirFrictionRot = 4.0;
 
     // Note: Speed is in the global frame
     state.player_speed.x += (state.camera_dir.x*input_dir.x + state.camera_dir_rotr.x*input_dir.y) * kPlayerInputAccel * dt;
@@ -298,9 +298,10 @@ static void Tick(f32 dt) {
     state.camera_dir_rotr = rotr((state.camera_dir));
 
     // Apply air friction
-    state.player_speed.x *= kAirFriction;
-    state.player_speed.y *= kAirFriction;
-    state.player_omega *= kAirFrictionRot;
+    f32 air_friction_decay = exp(-kAirFriction * dt);
+    state.player_speed.x *= air_friction_decay;
+    state.player_speed.y *= air_friction_decay;
+    state.player_omega *= exp(-kAirFrictionRot * dt);
 }
 
 
