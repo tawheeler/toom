@@ -304,14 +304,6 @@ static void Tick(f32 dt) {
     state.player_omega *= exp(-kAirFrictionRot * dt);
 }
 
-
-// Fill all pixels in the vertical line at x between y0 and y1 with the given color.
-static void DrawColumn(int x, int y0, int y1, u32 color) {
-    for (int y = y0; y <= y1; y++) {
-        state.pixels[(y * SCREEN_SIZE_X) + x] = color;
-    }
-}
-
 static void Render() {
     // Render the ceiling texture across the top half.
     {
@@ -521,7 +513,6 @@ static void Render() {
         int y_lo_capped = max(y_lo, 0);
         int y_hi_capped = min(y_hi, SCREEN_SIZE_Y-1);
 
-        // DrawColumn(x, 0, y_lo_capped-1, color_floor);
         {
             // Texture x offset determines whether we draw the light or dark version
             u32 texture_x_offset = dx_ind == 0 ? 0 : TEXTURE_SIZE;
@@ -542,7 +533,6 @@ static void Render() {
                 state.pixels[(y * SCREEN_SIZE_X) + x] = color;
             }
         }
-        // DrawColumn(x, y_hi_capped + 1, SCREEN_SIZE_Y-1, color_ceil);
     }
 }
 
