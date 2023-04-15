@@ -91,7 +91,7 @@ open(output_file, "w") do output
 		"floor_textures",
 		offset_in_file
 	))
-	offset_in_file += write_image(floor_textures, output, column_major=false)
+	offset_in_file += write_image(floor_textures, output, column_major=true)
 
 	# WRITE TABLE OF CONTENTS -----------------------------
 
