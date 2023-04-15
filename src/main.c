@@ -184,6 +184,7 @@ struct {
     SDL_Texture *texture;
     SDL_Renderer *renderer;
     u32 pixels[SCREEN_SIZE_X * SCREEN_SIZE_Y]; // row-major
+    f32 wall_raycast_radius[SCREEN_SIZE_X];
     bool quit;
 
     v2 camera_pos;
@@ -339,7 +340,7 @@ static void Render() {
             for (int x = 0; x < SCREEN_SIZE_X; x++) {
                 u32 texture_x = (int)(fmod(hit_x, TILE_WIDTH)/TILE_WIDTH * TEXTURE_SIZE) & (TEXTURE_SIZE - 1);
                 u32 texture_y = (int)(fmod(hit_y, TILE_WIDTH)/TILE_WIDTH * TEXTURE_SIZE) & (TEXTURE_SIZE - 1);
-                u32 color = GetRowMajorPixelAt(&BITMAP_FLOOR, texture_x+texture_x_offset, texture_y+texture_y_offset);
+                u32 color = GetColumnMajorPixelAt(&BITMAP_FLOOR, texture_x+texture_x_offset, texture_y+texture_y_offset);
                 state.pixels[(y * SCREEN_SIZE_X) + x] = color;
 
                 // step
@@ -367,7 +368,7 @@ static void Render() {
             for (int x = 0; x < SCREEN_SIZE_X; x++) {
                 u32 texture_x = (int)(fmod(hit_x, TILE_WIDTH)/TILE_WIDTH * TEXTURE_SIZE) & (TEXTURE_SIZE - 1);
                 u32 texture_y = (int)(fmod(hit_y, TILE_WIDTH)/TILE_WIDTH * TEXTURE_SIZE) & (TEXTURE_SIZE - 1);
-                u32 color = GetRowMajorPixelAt(&BITMAP_FLOOR, texture_x+texture_x_offset, texture_y+texture_y_offset);
+                u32 color = GetColumnMajorPixelAt(&BITMAP_FLOOR, texture_x+texture_x_offset, texture_y+texture_y_offset);
                 state.pixels[(y * SCREEN_SIZE_X) + x] = color;
 
                 // step
@@ -391,7 +392,6 @@ static void Render() {
         //     }
         // }
     }
-
 
     // Get camera location's cell coordinates
     int x_ind_cam = (int)(floorf(state.camera_pos.x / TILE_WIDTH));
@@ -506,6 +506,7 @@ static void Render() {
 
         // Calculate the ray length
         const f32 ray_len = length( ((v2) {collision.x - state.camera_pos.x, collision.y - state.camera_pos.y}) );
+        state.wall_raycast_radius[x] = ray_len;
 
         // Calculate the pixel bounds that we fill the wall in for
         int y_lo = (int)(SCREEN_SIZE_Y/2.0f - cam_len*state.camera_z/ray_len * SCREEN_SIZE_Y / state.camera_height);
@@ -524,13 +525,16 @@ static void Render() {
             } else {
                 rem = dx_ind < 0 ? y_rem : TILE_WIDTH - y_rem;
             }
-            u32 texture_x = (int) (TEXTURE_SIZE * rem / TILE_WIDTH);
+            u32 texture_x = min((int) (TEXTURE_SIZE * rem / TILE_WIDTH), TEXTURE_SIZE-1);
             u32 baseline = GetColumnMajorPixelIndex(&BITMAP_WALL, texture_x+texture_x_offset, texture_y_offset);
             u32 denom = max(1, y_hi - y_lo);
+            f32 y_loc = (f32)((y_hi - y_hi_capped) * TEXTURE_SIZE) / denom;
+            f32 y_step = (f32)(TEXTURE_SIZE) / denom;
             for (int y = y_hi_capped; y >= y_lo_capped; y--) {
-                u32 texture_y = (y_hi - y) * TEXTURE_SIZE / denom;
+                u32 texture_y = min((u32) (y_loc), TEXTURE_SIZE-1);
                 u32 color = BITMAP_WALL.abgr[texture_y+baseline];
                 state.pixels[(y * SCREEN_SIZE_X) + x] = color;
+                y_loc += y_step;
             }
         }
     }
@@ -592,7 +596,7 @@ int main(int argc, char *argv[]) {
                 BITMAP_WALL.n_pixels_per_column = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
                 asset_byte_offset += sizeof(u32);
                 BITMAP_WALL.column_major = ASSETS_BINARY_BLOB[asset_byte_offset];
-                ASSERT(BITMAP_WALL.column_major, "Expected the wall texture to be column-major");
+                ASSERT(BITMAP_WALL.column_major, "Expected the wall texture to be column-major\n");
                 asset_byte_offset += sizeof(u8);
                 BITMAP_WALL.abgr = (u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
                 BITMAP_WALL.n_pixels_per_row = BITMAP_WALL.n_pixels / BITMAP_WALL.n_pixels_per_column;
@@ -603,7 +607,7 @@ int main(int argc, char *argv[]) {
                 BITMAP_FLOOR.n_pixels_per_column = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
                 asset_byte_offset += sizeof(u32);
                 BITMAP_FLOOR.column_major = ASSETS_BINARY_BLOB[asset_byte_offset];
-                ASSERT(!BITMAP_FLOOR.column_major, "Expected the floor texture to be row-major");
+                ASSERT(BITMAP_FLOOR.column_major, "Expected the floor texture to be column-major\n");
                 asset_byte_offset += sizeof(u8);
                 BITMAP_FLOOR.abgr = (u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
                 BITMAP_FLOOR.n_pixels_per_row = BITMAP_FLOOR.n_pixels / BITMAP_FLOOR.n_pixels_per_column;
@@ -733,7 +737,13 @@ int main(int argc, char *argv[]) {
         // Get timer end for all the non-SDL stuff
         gettimeofday(&timeval_frame_end, NULL);
         const f64 game_ms_elapsed = GetElapsedTimeMillis(&timeval_frame_start, &timeval_frame_end);
-        printf("Game: %.3f ms, %.1f fps, frame dt %.3fs\n", game_ms_elapsed, 1000.0f / max(1.0f, game_ms_elapsed), dt);
+
+        static f64 tot_game_ms_elapsed = 0.0f;
+        static i64 n_frames = 0; 
+        tot_game_ms_elapsed += game_ms_elapsed;
+        n_frames += 1;
+
+        printf("Game: %.3f ms, %.1f fps, frame dt %.3fs, mean game ms: %.3f\n", game_ms_elapsed, 1000.0f / max(1.0f, game_ms_elapsed), dt, tot_game_ms_elapsed / n_frames);
 
         SDL_UpdateTexture(state.texture, NULL, state.pixels, SCREEN_SIZE_X * 4);
         SDL_RenderCopyEx(
