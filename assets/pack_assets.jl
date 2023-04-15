@@ -6,6 +6,16 @@ const N_BYTES_TOC_NAME = 16
 wall_textures = load("textures.tif")
 floor_textures = load("floor_textures.tif")
 
+mapdata = UInt8[
+    1 1 1 1 1 1 1 1 2 1 1 1 2;
+    1 0 0 0 0 0 0 1 2 0 0 0 2;
+    1 0 0 3 0 0 2 2 2 0 0 0 2;
+    1 0 0 0 0 0 0 0 0 0 0 0 2;
+    1 0 0 0 0 0 2 2 2 0 0 0 2;
+    1 0 2 0 0 0 0 1 2 0 0 0 2;
+    1 0 0 0 0 0 0 1 2 0 0 0 2;
+    1 1 1 1 1 1 1 1 2 3 3 3 2]
+
 # The output format is:
 # HEADER:
 #    "TOOM"   - 4 chars
@@ -67,6 +77,31 @@ function write_image(img, output::IOStream; column_major::Bool=true)::UInt32
 	return n_bytes_written
 end
 
+function write_map_data(mapdata::Matrix{UInt8}, output::IOStream)::UInt32
+	n_bytes_written = zero(UInt32)
+
+	# Write the number of tiles as a UInt32
+	n_tiles = UInt32(length(mapdata))
+	write(output, n_tiles::UInt32)
+	n_bytes_written += 4
+
+	# Write the number of tiles per row as a UInt32
+	n_pix_per_row = UInt32(size(mapdata)[2])
+	write(output, n_pix_per_row::UInt32)
+	n_bytes_written += 4
+
+	# Write out the tile values in row-major order.
+	# a11, a12, a13, a21, a22, a23, a31, a32, a33
+	for row in 1:size(mapdata)[1]
+		for col in 1:size(mapdata)[2]
+			write(output, mapdata[row, col]::UInt8)
+			n_bytes_written += 1
+		end
+	end
+
+	return n_bytes_written
+end
+
 offset_in_file = zero(UInt32)
 table_of_contents_entries = TableOfContentsEntry[]
 
@@ -93,6 +128,12 @@ open(output_file, "w") do output
 	))
 	offset_in_file += write_image(floor_textures, output, column_major=true)
 
+	push!(table_of_contents_entries, TableOfContentsEntry(
+		"mapdata",
+		offset_in_file
+	))
+	offset_in_file += write_map_data(mapdata, output)
+
 	# WRITE TABLE OF CONTENTS -----------------------------
 
 	for entry in table_of_contents_entries
@@ -101,7 +142,7 @@ open(output_file, "w") do output
 
 		for i in 1:N_BYTES_TOC_NAME-1
 			c = '\0'
-			if i < length(entry.name)
+			if i ≤ length(entry.name)
 				c = entry.name[i]
 			end
 			write(output, c)

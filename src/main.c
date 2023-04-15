@@ -42,22 +42,6 @@ typedef struct v2_s {f32 x, y;} v2;
 #define min(a, b) ({ __typeof__(a) _a = (a), _b = (b); _a < _b ? _a : _b; })
 #define max(a, b) ({ __typeof__(a) _a = (a), _b = (b); _a > _b ? _a : _b; })
 
-#define MAP_SIZE_X 13
-#define MAP_SIZE_Y 8
-static u8 MAPDATA[MAP_SIZE_X*MAP_SIZE_Y] = {
-    1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 2,
-    1, 0, 0, 0, 0, 0, 0, 1, 2, 0, 0, 0, 2,
-    1, 0, 0, 3, 0, 0, 2, 2, 2, 0, 0, 0, 2,
-    1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
-    1, 0, 0, 0, 0, 0, 2, 2, 2, 0, 0, 0, 2,
-    1, 0, 2, 0, 0, 0, 0, 1, 2, 0, 0, 0, 2,
-    1, 0, 0, 0, 0, 0, 0, 1, 2, 0, 0, 0, 2,
-    1, 1, 1, 1, 1, 1, 1, 1, 2, 3, 3, 3, 2
-};
-
-static inline u8 GetMapDataAt(int x, int y) {
-    return MAPDATA[(MAP_SIZE_Y - y - 1)*MAP_SIZE_X + x];
-}
 
 // Big binary assets blob that we load at init.
 u8* ASSETS_BINARY_BLOB = NULL;
@@ -68,12 +52,26 @@ struct BinaryAssetTableOfContentEntry {
     char name[16];  
 };
 
+struct Mapdata {
+    u32  n_tiles;
+    u32  n_tiles_x;
+    u32  n_tiles_y;
+    u8* tiles;
+};
+
+static inline u8 GetMapDataAt(struct Mapdata* mapdata, int x, int y) {
+    return mapdata->tiles[(mapdata->n_tiles_y - y - 1)*(mapdata->n_tiles_x) + x];
+}
+
+// The global mapdata. This just points into our asset blob.
+struct Mapdata MAPDATA;
+
 struct Bitmap {
     u32  n_pixels;
     u32  n_pixels_per_column;
     u32  n_pixels_per_row;
     bool column_major;
-    u32* abgr; // pixel x, y is at abgr[y + x*n_pixels_per_column]
+    u32* abgr;
 };
 
 // The bitmap global variables. These just point into the binary blob.
@@ -270,7 +268,7 @@ static void LoadAssets() {
             printf("Entry %d: %s at offset %d\n", i, entry->name, entry->byte_offset);
 
             // In the future, load them into a map or something. For now, we're specifically looking for either the wall or floor textures.
-            if (strcmp(entry->name, "wall_texture") == 0) {
+            if (strcmp(entry->name, "wall_textures") == 0) {
                 u32 asset_byte_offset = entry->byte_offset;
                 BITMAP_WALL.n_pixels            = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
                 asset_byte_offset += sizeof(u32);
@@ -281,7 +279,7 @@ static void LoadAssets() {
                 asset_byte_offset += sizeof(u8);
                 BITMAP_WALL.abgr = (u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
                 BITMAP_WALL.n_pixels_per_row = BITMAP_WALL.n_pixels / BITMAP_WALL.n_pixels_per_column;
-            } else if (strcmp(entry->name, "floor_texture") == 0) {
+            } else if (strcmp(entry->name, "floor_textures") == 0) {
                 u32 asset_byte_offset = entry->byte_offset;
                 BITMAP_FLOOR.n_pixels            = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
                 asset_byte_offset += sizeof(u32);
@@ -292,6 +290,14 @@ static void LoadAssets() {
                 asset_byte_offset += sizeof(u8);
                 BITMAP_FLOOR.abgr = (u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
                 BITMAP_FLOOR.n_pixels_per_row = BITMAP_FLOOR.n_pixels / BITMAP_FLOOR.n_pixels_per_column;
+            } else if (strcmp(entry->name, "mapdata") == 0) {
+                u32 asset_byte_offset = entry->byte_offset;
+                MAPDATA.n_tiles = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
+                asset_byte_offset += sizeof(u32);
+                MAPDATA.n_tiles_x = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
+                asset_byte_offset += sizeof(u32);
+                MAPDATA.tiles = (u8*)(ASSETS_BINARY_BLOB + asset_byte_offset);
+                MAPDATA.n_tiles_y = MAPDATA.n_tiles / MAPDATA.n_tiles_x;
             }
         }
     }
@@ -582,7 +588,7 @@ static void Render() {
             y_rem += dir.y * dt_best - TILE_WIDTH*dy_ind;
 
             // Check to see if the new cell is solid
-            if (GetMapDataAt(x_ind,y_ind) > 0) {
+            if (GetMapDataAt(&MAPDATA, x_ind,y_ind) > 0) {
                 break;
             }
         }
@@ -606,7 +612,7 @@ static void Render() {
         {
             // Texture x offset determines whether we draw the light or dark version
             u32 texture_x_offset = dx_ind == 0 ? 0 : TEXTURE_SIZE;
-            u32 texture_y_offset = (GetMapDataAt(x_ind,y_ind) - 1) * TEXTURE_SIZE;
+            u32 texture_y_offset = (GetMapDataAt(&MAPDATA, x_ind,y_ind) - 1) * TEXTURE_SIZE;
 
             f32 rem = 0.0f;
             if (dx_ind == 0) {
