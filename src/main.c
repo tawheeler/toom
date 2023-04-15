@@ -112,6 +112,7 @@ struct KeyBoardState {
     enum KeyboardKeyState w;
     enum KeyboardKeyState q;
     enum KeyboardKeyState e;
+    enum KeyboardKeyState r;
 
     enum KeyboardKeyState one;
     enum KeyboardKeyState two;
@@ -134,6 +135,7 @@ void ClearKeyboardState(struct KeyBoardState* kbs) {
     kbs->w = KeyboardKeyState_Depressed;
     kbs->q = KeyboardKeyState_Depressed;
     kbs->e = KeyboardKeyState_Depressed;
+    kbs->r = KeyboardKeyState_Depressed;
 
     kbs->one = KeyboardKeyState_Depressed;
     kbs->two = KeyboardKeyState_Depressed;
@@ -163,6 +165,7 @@ void DecayKeyboardState(struct KeyBoardState* kbs) {
     kbs->w = to_depressed_state[kbs->w];
     kbs->q = to_depressed_state[kbs->q];
     kbs->e = to_depressed_state[kbs->e];
+    kbs->r = to_depressed_state[kbs->r];
 
     kbs->one = to_depressed_state[kbs->one];
     kbs->two = to_depressed_state[kbs->two];
@@ -213,6 +216,86 @@ f64 GetElapsedTimeMillis(struct timeval* timeval_start, struct timeval* timeval_
     return ms_elapsed;
 }
 
+static void LoadAssets() {
+    // If we currently have any loaded assets, free them.
+    // Note that we assume we are running single-threaded. If this changes in the future,
+    // we will want to load the assets in a separate thread and swap them over at the 
+    // appropriate time.
+    if (ASSETS_BINARY_BLOB) {
+        free(ASSETS_BINARY_BLOB);
+    }
+
+    {
+        // The format is:
+        // HEADER:
+        //    "TOOM"   - 4 chars
+        // Data:
+        //   necessary data, laid out as needed.
+        // Table of Contents:
+        //   array of table of content entries:
+        //      u32       offset in file # number of bytes past 'TOOM' to read at. First entry will have offset 0
+        //      char[16]  name           # null-terminated string label, e.g. "floor_textures"
+        //   u32 n_toc_entries = number of table of content entries
+
+        FILE* fileptr = fopen("assets/assets.bin","rb");
+        ASSERT(fileptr, "Error opening assets file\n");
+        
+        // Count the number of bytes
+        fseek(fileptr, 0, SEEK_END);
+        u32 n_bytes_in_file = ftell(fileptr);
+        ASSETS_BINARY_BLOB_SIZE = n_bytes_in_file - 4; // Everything past the 'TOOM' header
+        
+        // Read in the binary assets as a single blob
+        fseek(fileptr, 4, SEEK_SET); // Skip the header bytes
+        ASSETS_BINARY_BLOB = (u8*) malloc(ASSETS_BINARY_BLOB_SIZE);
+        ASSERT(ASSETS_BINARY_BLOB, "Failed to allocate assets blob\n");
+        ASSERT(fread(ASSETS_BINARY_BLOB, sizeof(u8), ASSETS_BINARY_BLOB_SIZE, fileptr) == ASSETS_BINARY_BLOB_SIZE, "Failed to read assets blob when loading assets\n");
+
+        fclose(fileptr);
+    }
+    {
+        // Process the loaded assets from the loaded binary blob
+
+        // Read the number of table of content entries
+        u32 byte_index = ASSETS_BINARY_BLOB_SIZE - sizeof(u32);
+        u32 n_toc_entries = *(u32*)(ASSETS_BINARY_BLOB + byte_index);
+        ASSERT(ASSETS_BINARY_BLOB_SIZE > sizeof(struct BinaryAssetTableOfContentEntry) * n_toc_entries + 4, "Number of table of content entries is impossible given the number of bytes\n");
+
+        // Scan through them in reverse order
+        for (int i = n_toc_entries; i > 0; i--) {
+            byte_index -= sizeof(struct BinaryAssetTableOfContentEntry);
+            struct BinaryAssetTableOfContentEntry* entry = (struct BinaryAssetTableOfContentEntry*)(ASSETS_BINARY_BLOB + byte_index);
+            // Make the name null-terminated just in case.
+            entry->name[15] = '\0';
+            printf("Entry %d: %s at offset %d\n", i, entry->name, entry->byte_offset);
+
+            // In the future, load them into a map or something. For now, we're specifically looking for either the wall or floor textures.
+            if (strcmp(entry->name, "wall_texture") == 0) {
+                u32 asset_byte_offset = entry->byte_offset;
+                BITMAP_WALL.n_pixels            = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
+                asset_byte_offset += sizeof(u32);
+                BITMAP_WALL.n_pixels_per_column = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
+                asset_byte_offset += sizeof(u32);
+                BITMAP_WALL.column_major = ASSETS_BINARY_BLOB[asset_byte_offset];
+                ASSERT(BITMAP_WALL.column_major, "Expected the wall texture to be column-major\n");
+                asset_byte_offset += sizeof(u8);
+                BITMAP_WALL.abgr = (u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
+                BITMAP_WALL.n_pixels_per_row = BITMAP_WALL.n_pixels / BITMAP_WALL.n_pixels_per_column;
+            } else if (strcmp(entry->name, "floor_texture") == 0) {
+                u32 asset_byte_offset = entry->byte_offset;
+                BITMAP_FLOOR.n_pixels            = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
+                asset_byte_offset += sizeof(u32);
+                BITMAP_FLOOR.n_pixels_per_column = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
+                asset_byte_offset += sizeof(u32);
+                BITMAP_FLOOR.column_major = ASSETS_BINARY_BLOB[asset_byte_offset];
+                ASSERT(BITMAP_FLOOR.column_major, "Expected the floor texture to be column-major\n");
+                asset_byte_offset += sizeof(u8);
+                BITMAP_FLOOR.abgr = (u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
+                BITMAP_FLOOR.n_pixels_per_row = BITMAP_FLOOR.n_pixels / BITMAP_FLOOR.n_pixels_per_column;
+            }
+        }
+    }
+}
 
 static void Tick(f32 dt) {
 
@@ -236,6 +319,12 @@ static void Tick(f32 dt) {
     }
     if (IsPressed(state.keyboard_state.e)) {
         input_rot_dir -= 1;
+    }
+
+    if (IsPressed(state.keyboard_state.r)) {
+        printf("Reloading assets.\n");
+        LoadAssets();
+        printf("DONE.\n");
     }
 
     if (IsPressed(state.keyboard_state.three)) {
@@ -293,7 +382,7 @@ static void Tick(f32 dt) {
     state.camera_pos.y += state.player_speed.y * dt;
 
     // Update the player's rotational heading
-    float theta = atan2(state.camera_dir.y, state.camera_dir.x);
+    f32 theta = atan2(state.camera_dir.y, state.camera_dir.x);
     theta += state.player_omega * dt;
     state.camera_dir = ((v2) {cos(theta), sin(theta)});   
     state.camera_dir_rotr = rotr((state.camera_dir));
@@ -306,7 +395,7 @@ static void Tick(f32 dt) {
 }
 
 static void Render() {
-    // Render the ceiling texture across the top half.
+    // Render the floor and ceiling textures
     {
 
         // Ray direction for x = 0
@@ -544,76 +633,7 @@ int main(int argc, char *argv[]) {
 
     // Load our assets
     printf("Loading assets.\n");
-    {
-        // The format is:
-        // HEADER:
-        //    "TOOM"   - 4 chars
-        // Data:
-        //   necessary data, laid out as needed.
-        // Table of Contents:
-        //   array of table of content entries:
-        //      u32       offset in file # number of bytes past 'TOOM' to read at. First entry will have offset 0
-        //      char[16]  name           # null-terminated string label, e.g. "floor_textures"
-        //   u32 n_toc_entries = number of table of content entries
-
-        FILE* fileptr = fopen("assets/assets.bin","rb");
-        ASSERT(fileptr, "Error opening assets file\n");
-        
-        // Count the number of bytes
-        fseek(fileptr, 0, SEEK_END);
-        u32 n_bytes_in_file = ftell(fileptr);
-        ASSETS_BINARY_BLOB_SIZE = n_bytes_in_file - 4; // Everything past the 'TOOM' header
-        
-        // Read in the binary assets as a single blob
-        fseek(fileptr, 4, SEEK_SET); // Skip the header bytes
-        ASSETS_BINARY_BLOB = (u8*) malloc(ASSETS_BINARY_BLOB_SIZE);
-        ASSERT(ASSETS_BINARY_BLOB, "Failed to allocate assets blob\n");
-        ASSERT(fread(ASSETS_BINARY_BLOB, sizeof(u8), ASSETS_BINARY_BLOB_SIZE, fileptr) == ASSETS_BINARY_BLOB_SIZE, "Failed to read assets blob when loading assets\n");
-
-        fclose(fileptr);
-    }
-    {
-        // Process the loaded assets from the loaded binary blob
-
-        // Read the number of table of content entries
-        u32 byte_index = ASSETS_BINARY_BLOB_SIZE - sizeof(u32);
-        u32 n_toc_entries = *(u32*)(ASSETS_BINARY_BLOB + byte_index);
-        ASSERT(ASSETS_BINARY_BLOB_SIZE > sizeof(struct BinaryAssetTableOfContentEntry) * n_toc_entries + 4, "Number of table of content entries is impossible given the number of bytes\n");
-
-        // Scan through them in reverse order
-        for (int i = n_toc_entries; i > 0; i--) {
-            byte_index -= sizeof(struct BinaryAssetTableOfContentEntry);
-            struct BinaryAssetTableOfContentEntry* entry = (struct BinaryAssetTableOfContentEntry*)(ASSETS_BINARY_BLOB + byte_index);
-            // Make the name null-terminated just in case.
-            entry->name[15] = '\0';
-            printf("Entry %d: %s at offset %d\n", i, entry->name, entry->byte_offset);
-
-            // In the future, load them into a map or something. For now, we're specifically looking for either the wall or floor textures.
-            if (strcmp(entry->name, "wall_texture") == 0) {
-                u32 asset_byte_offset = entry->byte_offset;
-                BITMAP_WALL.n_pixels            = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
-                asset_byte_offset += sizeof(u32);
-                BITMAP_WALL.n_pixels_per_column = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
-                asset_byte_offset += sizeof(u32);
-                BITMAP_WALL.column_major = ASSETS_BINARY_BLOB[asset_byte_offset];
-                ASSERT(BITMAP_WALL.column_major, "Expected the wall texture to be column-major\n");
-                asset_byte_offset += sizeof(u8);
-                BITMAP_WALL.abgr = (u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
-                BITMAP_WALL.n_pixels_per_row = BITMAP_WALL.n_pixels / BITMAP_WALL.n_pixels_per_column;
-            } else if (strcmp(entry->name, "floor_texture") == 0) {
-                u32 asset_byte_offset = entry->byte_offset;
-                BITMAP_FLOOR.n_pixels            = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
-                asset_byte_offset += sizeof(u32);
-                BITMAP_FLOOR.n_pixels_per_column = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
-                asset_byte_offset += sizeof(u32);
-                BITMAP_FLOOR.column_major = ASSETS_BINARY_BLOB[asset_byte_offset];
-                ASSERT(BITMAP_FLOOR.column_major, "Expected the floor texture to be column-major\n");
-                asset_byte_offset += sizeof(u8);
-                BITMAP_FLOOR.abgr = (u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
-                BITMAP_FLOOR.n_pixels_per_row = BITMAP_FLOOR.n_pixels / BITMAP_FLOOR.n_pixels_per_column;
-            }
-        }
-    }
+    LoadAssets();
     printf("DONE.\n");
 
     // Initialize SDL
@@ -691,6 +711,7 @@ int main(int argc, char *argv[]) {
                     case (SDLK_w)     : state.keyboard_state.w     = KeyboardKeyState_Pressed; break;
                     case (SDLK_q)     : state.keyboard_state.q     = KeyboardKeyState_Pressed; break;
                     case (SDLK_e)     : state.keyboard_state.e     = KeyboardKeyState_Pressed; break;
+                    case (SDLK_r)     : state.keyboard_state.r     = KeyboardKeyState_Pressed; break;
                     case (SDLK_1)     : state.keyboard_state.one   = KeyboardKeyState_Pressed; break;
                     case (SDLK_2)     : state.keyboard_state.two   = KeyboardKeyState_Pressed; break;
                     case (SDLK_3)     : state.keyboard_state.three = KeyboardKeyState_Pressed; break;
@@ -712,6 +733,7 @@ int main(int argc, char *argv[]) {
                     case (SDLK_w)     : state.keyboard_state.w     = KeyboardKeyState_Released; break;
                     case (SDLK_q)     : state.keyboard_state.q     = KeyboardKeyState_Released; break;
                     case (SDLK_e)     : state.keyboard_state.e     = KeyboardKeyState_Released; break;
+                    case (SDLK_r)     : state.keyboard_state.r     = KeyboardKeyState_Released; break;
                     case (SDLK_1)     : state.keyboard_state.one   = KeyboardKeyState_Released; break;
                     case (SDLK_2)     : state.keyboard_state.two   = KeyboardKeyState_Released; break;
                     case (SDLK_3)     : state.keyboard_state.three = KeyboardKeyState_Released; break;
