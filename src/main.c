@@ -79,6 +79,7 @@ struct Bitmap {
 
 // The bitmap global variables. These just point into the binary blob.
 struct Bitmap BITMAP;
+struct Bitmap BITMAP_STICK;
 
 static inline int GetColumnMajorPixelIndex(struct Bitmap* bitmap, int x, int y) {
     return y + x*bitmap->n_pixels_per_column;
@@ -182,6 +183,10 @@ bool IsPressed(enum KeyboardKeyState state) {
     return lookup[state];
 }
 
+bool IsNewlyPressed(enum KeyboardKeyState state) {
+    return state == KeyboardKeyState_Pressed;
+}
+
 struct { 
     SDL_Window *window;
     SDL_Texture *texture;
@@ -275,7 +280,7 @@ static void LoadAssets() {
             // In the future, load them into a map or something. For now, we're specifically looking for either the wall or floor textures.
             if (strcmp(entry->name, "textures") == 0) {
                 u32 asset_byte_offset = entry->byte_offset;
-                BITMAP.n_pixels            = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
+                BITMAP.n_pixels = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
                 asset_byte_offset += sizeof(u32);
                 BITMAP.n_pixels_per_column = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
                 asset_byte_offset += sizeof(u32);
@@ -284,6 +289,18 @@ static void LoadAssets() {
                 asset_byte_offset += sizeof(u8);
                 BITMAP.abgr = (u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
                 BITMAP.n_pixels_per_row = BITMAP.n_pixels / BITMAP.n_pixels_per_column;
+                loaded_textures = 1;
+            } else if (strcmp(entry->name, "stick") == 0) {
+                u32 asset_byte_offset = entry->byte_offset;
+                BITMAP_STICK.n_pixels = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
+                asset_byte_offset += sizeof(u32);
+                BITMAP_STICK.n_pixels_per_column = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
+                asset_byte_offset += sizeof(u32);
+                BITMAP_STICK.column_major = ASSETS_BINARY_BLOB[asset_byte_offset];
+                ASSERT(BITMAP_STICK.column_major, "Expected the stick texture to be column-major\n");
+                asset_byte_offset += sizeof(u8);
+                BITMAP_STICK.abgr = (u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
+                BITMAP_STICK.n_pixels_per_row = BITMAP_STICK.n_pixels / BITMAP_STICK.n_pixels_per_column;
                 loaded_textures = 1;
             } else if (strcmp(entry->name, "mapdata") == 0) {
                 u32 asset_byte_offset = entry->byte_offset;
@@ -330,7 +347,7 @@ static void Tick(f32 dt) {
         input_rot_dir -= 1;
     }
 
-    if (IsPressed(state.keyboard_state.r)) {
+    if (IsNewlyPressed(state.keyboard_state.r)) {
         printf("Reloading assets.\n");
         LoadAssets();
         printf("DONE.\n");
@@ -362,9 +379,9 @@ static void Tick(f32 dt) {
     }
 
     // Update the player's velocity
-    const f32 kPlayerInputAccel = 5.5;
+    const f32 kPlayerInputAccel = 6.5;
     const f32 kPlayerInputAngularAccel = 8.5;
-    const f32 kPlayerMaxSpeed = 4.0;
+    const f32 kPlayerMaxSpeed = 5.0;
     const f32 kPlayerMaxOmega = 5.0;
     const f32 kAirFriction = 4.0;
     const f32 kAirFrictionRot = 4.0;
@@ -631,27 +648,74 @@ static void Render() {
         int y_lo_capped = max(y_lo, 0);
         int y_hi_capped = min(y_hi, SCREEN_SIZE_Y-1);
 
-        {
-            // Texture x offset determines whether we draw the light or dark version
-            u32 texture_x_offset = dx_ind == 0 ? 0 : TEXTURE_SIZE;
-            u32 texture_y_offset = (MAPDATA.tiles[GetMapDataIndex(&MAPDATA, x_ind,y_ind)] - 1) * TEXTURE_SIZE;
+        // Texture x offset determines whether we draw the light or dark version
+        u32 texture_x_offset = dx_ind == 0 ? 0 : TEXTURE_SIZE;
+        u32 texture_y_offset = (MAPDATA.tiles[GetMapDataIndex(&MAPDATA, x_ind,y_ind)] - 1) * TEXTURE_SIZE;
 
-            f32 rem = 0.0f;
-            if (dx_ind == 0) {
-                rem = dy_ind < 0 ? TILE_WIDTH - x_rem : x_rem;
-            } else {
-                rem = dx_ind < 0 ? y_rem : TILE_WIDTH - y_rem;
-            }
-            u32 texture_x = min((int) (TEXTURE_SIZE * rem / TILE_WIDTH), TEXTURE_SIZE-1);
-            u32 baseline = GetColumnMajorPixelIndex(&BITMAP, texture_x+texture_x_offset, texture_y_offset);
+        f32 rem = 0.0f;
+        if (dx_ind == 0) {
+            rem = dy_ind < 0 ? TILE_WIDTH - x_rem : x_rem;
+        } else {
+            rem = dx_ind < 0 ? y_rem : TILE_WIDTH - y_rem;
+        }
+        u32 texture_x = min((int) (TEXTURE_SIZE * rem / TILE_WIDTH), TEXTURE_SIZE-1);
+        u32 baseline = GetColumnMajorPixelIndex(&BITMAP, texture_x+texture_x_offset, texture_y_offset);
+        u32 denom = max(1, y_hi - y_lo);
+        f32 y_loc = (f32)((y_hi - y_hi_capped) * TEXTURE_SIZE) / denom;
+        f32 y_step = (f32)(TEXTURE_SIZE) / denom;
+        for (int y = y_hi_capped; y >= y_lo_capped; y--) {
+            u32 texture_y = min((u32) (y_loc), TEXTURE_SIZE-1);
+            u32 color = BITMAP.abgr[texture_y+baseline];
+            state.pixels[(y * SCREEN_SIZE_X) + x] = color;
+            y_loc += y_step;
+        }
+    }
+
+    // Render objects
+    {   
+        f32 s = state.camera_dir.y;
+        f32 c = state.camera_dir.x;
+
+        v2 stick_pos = { 10.0f, 4.5f };
+        v2 stick_rel_camera = {stick_pos.x - state.camera_pos.x, stick_pos.y - state.camera_pos.y};
+        f32 dist_to_player = length(stick_rel_camera);
+
+        v2 stick_pos_cam_body = {
+            c*stick_rel_camera.x + s*stick_rel_camera.y,
+            c*stick_rel_camera.y - s*stick_rel_camera.x
+        };
+
+        // Only render if they are on the postive side of the camera
+        if (stick_pos_cam_body.x > 1e-3) {
+            // Calculate the column pixel bounds
+            f32 cam_len = 1.0; // TODO
+            int y_lo = (int)(SCREEN_SIZE_Y/2.0f - cam_len*state.camera_z/dist_to_player * SCREEN_SIZE_Y / state.camera_height);
+            int y_hi = (int)(SCREEN_SIZE_Y/2.0f + cam_len*(WALL_HEIGHT - state.camera_z)/dist_to_player * SCREEN_SIZE_Y / state.camera_height);
+            int y_lo_capped = max(y_lo, 0);
+            int y_hi_capped = min(y_hi, SCREEN_SIZE_Y-1);
             u32 denom = max(1, y_hi - y_lo);
-            f32 y_loc = (f32)((y_hi - y_hi_capped) * TEXTURE_SIZE) / denom;
             f32 y_step = (f32)(TEXTURE_SIZE) / denom;
-            for (int y = y_hi_capped; y >= y_lo_capped; y--) {
-                u32 texture_y = min((u32) (y_loc), TEXTURE_SIZE-1);
-                u32 color = BITMAP.abgr[texture_y+baseline];
-                state.pixels[(y * SCREEN_SIZE_X) + x] = color;
-                y_loc += y_step;
+
+            int x_column_lo = (int)((0.5 - ((stick_pos_cam_body.y + TILE_WIDTH/2) / stick_pos_cam_body.x)/(state.camera_width))*SCREEN_SIZE_X);
+            int x_column_hi = (int)((0.5 - ((stick_pos_cam_body.y - TILE_WIDTH/2) / stick_pos_cam_body.x)/(state.camera_width))*SCREEN_SIZE_X);
+            f32 x_step = ((f32)(TEXTURE_SIZE)/(x_column_hi - x_column_lo + 1));
+            f32 x_loc = 0.0f;
+            for (int x = x_column_lo; x <= x_column_hi; x++) {
+                
+                if (x >= 0 && x < SCREEN_SIZE_X && state.wall_raycast_radius[x] > dist_to_player) {
+                    u32 texture_x = min((u32) (x_loc), TEXTURE_SIZE-1);
+                    f32 y_loc = (f32)((y_hi - y_hi_capped) * TEXTURE_SIZE) / denom;
+                    for (int y = y_hi_capped; y >= y_lo_capped; y--) {
+                        u32 texture_y = min((u32) (y_loc), TEXTURE_SIZE-1);
+                        u32 color = GetColumnMajorPixelAt(&BITMAP_STICK, texture_x, texture_y);
+                        if ((color >> 24) > 0) {
+                            state.pixels[(y * SCREEN_SIZE_X) + x] = color;
+                        }
+                        y_loc += y_step;
+                    }
+                }
+
+                x_loc += x_step;
             }
         }
     }

@@ -3,8 +3,6 @@ using FileIO
 
 const N_BYTES_TOC_NAME = 16
 
-textures = load("textures.tif")
-
 tiles = UInt8[
     1 1 1 1 1 1 1 1 2 1 1 1 2;
     1 0 0 0 0 0 0 1 2 0 0 0 2;
@@ -76,7 +74,7 @@ function write_image(img, output::IOStream; column_major::Bool=true)::UInt32
 				write(output, (img[row, col].r.i)::UInt8)
 				write(output, (img[row, col].g.i)::UInt8)
 				write(output, (img[row, col].b.i)::UInt8)
-				write(output, 0xFF);
+				write(output, img[row, col] == RGB(1.0, 0.0, 1.0) ? 0x00 : 0xFF);
 				n_bytes_written += 4
 			end
 		end
@@ -87,7 +85,7 @@ function write_image(img, output::IOStream; column_major::Bool=true)::UInt32
 				write(output, (img[row, col].r.i)::UInt8)
 				write(output, (img[row, col].g.i)::UInt8)
 				write(output, (img[row, col].b.i)::UInt8)
-				write(output, 0xFF);
+				write(output, img[row, col] == RGB(1.0, 0.0, 1.0) ? 0x00 : 0xFF);
 				n_bytes_written += 4
 			end
 		end
@@ -165,7 +163,13 @@ open(output_file, "w") do output
 		"textures",
 		offset_in_file
 	))
-	offset_in_file += write_image(textures, output, column_major=true)
+	offset_in_file += write_image(load("textures.tif"), output, column_major=true)
+
+	push!(table_of_contents_entries, TableOfContentsEntry(
+		"stick",
+		offset_in_file
+	))
+	offset_in_file += write_image(load("stick.tif"), output, column_major=true)
 
 	push!(table_of_contents_entries, TableOfContentsEntry(
 		"mapdata",
