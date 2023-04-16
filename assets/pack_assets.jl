@@ -5,7 +5,7 @@ const N_BYTES_TOC_NAME = 16
 
 textures = load("textures.tif")
 
-mapdata = UInt8[
+tiles = UInt8[
     1 1 1 1 1 1 1 1 2 1 1 1 2;
     1 0 0 0 0 0 0 1 2 0 0 0 2;
     1 0 0 3 0 0 2 2 2 0 0 0 2;
@@ -13,6 +13,26 @@ mapdata = UInt8[
     1 0 0 0 0 0 2 2 2 0 0 0 2;
     1 0 2 0 0 0 0 1 2 0 0 0 2;
     1 0 0 0 0 0 0 1 2 0 0 0 2;
+    1 1 1 1 1 1 1 1 2 3 3 3 2]
+
+floor = UInt8[
+    1 1 1 1 1 1 1 1 2 1 1 1 2;
+    1 4 4 4 4 4 4 1 2 5 5 5 2;
+    1 4 4 3 4 4 2 2 2 5 5 5 2;
+    1 4 4 4 4 4 2 2 2 5 5 5 2;
+    1 4 4 4 4 4 2 2 2 5 5 5 2;
+    1 4 2 4 4 4 4 1 2 5 5 5 2;
+    1 4 4 4 4 4 4 1 2 5 5 5 2;
+    1 1 1 1 1 1 1 1 2 3 3 3 2]
+
+ceiling = UInt8[
+    1 1 1 1 1 1 1 1 2 1 1 1 2;
+    1 4 4 4 4 4 4 1 2 4 4 4 2;
+    1 4 4 3 4 4 2 2 2 4 4 4 2;
+    1 4 4 4 4 4 2 2 2 4 4 4 2;
+    1 4 4 4 4 4 2 2 2 4 4 4 2;
+    1 4 2 4 4 4 4 1 2 4 4 4 2;
+    1 4 4 4 4 4 4 1 2 4 4 4 2;
     1 1 1 1 1 1 1 1 2 3 3 3 2]
 
 # The output format is:
@@ -76,24 +96,50 @@ function write_image(img, output::IOStream; column_major::Bool=true)::UInt32
 	return n_bytes_written
 end
 
-function write_map_data(mapdata::Matrix{UInt8}, output::IOStream)::UInt32
+function write_map_data(
+	tiles::Matrix{UInt8},
+	floor::Matrix{UInt8},
+	ceiling::Matrix{UInt8},
+	output::IOStream)::UInt32
+
+	@assert size(tiles) == size(floor)
+	@assert size(tiles) == size(ceiling)
+
 	n_bytes_written = zero(UInt32)
 
 	# Write the number of tiles as a UInt32
-	n_tiles = UInt32(length(mapdata))
+	n_tiles = UInt32(length(tiles))
 	write(output, n_tiles::UInt32)
 	n_bytes_written += 4
 
 	# Write the number of tiles per row as a UInt32
-	n_pix_per_row = UInt32(size(mapdata)[2])
+	n_pix_per_row = UInt32(size(tiles)[2])
 	write(output, n_pix_per_row::UInt32)
 	n_bytes_written += 4
 
 	# Write out the tile values in row-major order.
 	# a11, a12, a13, a21, a22, a23, a31, a32, a33
-	for row in 1:size(mapdata)[1]
-		for col in 1:size(mapdata)[2]
-			write(output, mapdata[row, col]::UInt8)
+	for row in 1:size(tiles)[1]
+		for col in 1:size(tiles)[2]
+			write(output, tiles[row, col]::UInt8)
+			n_bytes_written += 1
+		end
+	end
+
+	# Write out the floor values in row-major order.
+	# a11, a12, a13, a21, a22, a23, a31, a32, a33
+	for row in 1:size(floor)[1]
+		for col in 1:size(floor)[2]
+			write(output, floor[row, col]::UInt8)
+			n_bytes_written += 1
+		end
+	end
+
+	# Write out the ceiling values in row-major order.
+	# a11, a12, a13, a21, a22, a23, a31, a32, a33
+	for row in 1:size(ceiling)[1]
+		for col in 1:size(ceiling)[2]
+			write(output, ceiling[row, col]::UInt8)
 			n_bytes_written += 1
 		end
 	end
@@ -125,7 +171,7 @@ open(output_file, "w") do output
 		"mapdata",
 		offset_in_file
 	))
-	offset_in_file += write_map_data(mapdata, output)
+	offset_in_file += write_map_data(tiles, floor, ceiling, output)
 
 	# WRITE TABLE OF CONTENTS -----------------------------
 

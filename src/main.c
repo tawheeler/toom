@@ -41,6 +41,7 @@ typedef struct v2_s {f32 x, y;} v2;
 #define rotr(v) ({ const v2 _v = (v); (v2) { -_v.y, _v.x }; })
 #define min(a, b) ({ __typeof__(a) _a = (a), _b = (b); _a < _b ? _a : _b; })
 #define max(a, b) ({ __typeof__(a) _a = (a), _b = (b); _a > _b ? _a : _b; })
+#define clamp(v, lo, hi) ({ __typeof__(v) _v = (v), _lo = (lo), _hi = (hi); _v > _hi ? _hi : (_v < _lo ? _lo : _v); })
 
 
 // Big binary assets blob that we load at init.
@@ -56,11 +57,13 @@ struct Mapdata {
     u32  n_tiles;
     u32  n_tiles_x;
     u32  n_tiles_y;
-    u8* tiles;
+    u8* tiles; // Each tile is either solid (0) or has a texture index (>0)
+    u8* floor;
+    u8* ceiling;
 };
 
-static inline u8 GetMapDataAt(struct Mapdata* mapdata, int x, int y) {
-    return mapdata->tiles[(mapdata->n_tiles_y - y - 1)*(mapdata->n_tiles_x) + x];
+static inline u8 GetMapDataIndex(struct Mapdata* mapdata, int x, int y) {
+    return (mapdata->n_tiles_y - y - 1)*(mapdata->n_tiles_x) + x;
 }
 
 // The global mapdata. This just points into our asset blob.
@@ -289,6 +292,10 @@ static void LoadAssets() {
                 MAPDATA.n_tiles_x = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
                 asset_byte_offset += sizeof(u32);
                 MAPDATA.tiles = (u8*)(ASSETS_BINARY_BLOB + asset_byte_offset);
+                asset_byte_offset += MAPDATA.n_tiles * sizeof(u8);
+                MAPDATA.floor = (u8*)(ASSETS_BINARY_BLOB + asset_byte_offset);
+                asset_byte_offset += MAPDATA.n_tiles * sizeof(u8);
+                MAPDATA.ceiling = (u8*)(ASSETS_BINARY_BLOB + asset_byte_offset);
                 MAPDATA.n_tiles_y = MAPDATA.n_tiles / MAPDATA.n_tiles_x;
                 loaded_mapdata = 1;
             }
@@ -410,8 +417,6 @@ static void Render() {
         f32 ray_dir_hi_y = state.camera_dir.y - half_camera_width*state.camera_dir_rotr.y;        
 
         // Draw floor
-        u32 texture_x_offset = 0;
-        u32 texture_y_offset = 0;
         for (int y = 0; y < SCREEN_SIZE_Y/2; y++) {
             // Radius
             f32 zpp = (SCREEN_SIZE_Y/2.0f - y) * (state.camera_height / SCREEN_SIZE_Y);
@@ -429,8 +434,20 @@ static void Render() {
             f32 step_y = radius * (ray_dir_hi_y - ray_dir_lo_y) / SCREEN_SIZE_X;
 
             for (int x = 0; x < SCREEN_SIZE_X; x++) {
-                u32 texture_x = (int)(fmod(hit_x, TILE_WIDTH)/TILE_WIDTH * TEXTURE_SIZE) & (TEXTURE_SIZE - 1);
-                u32 texture_y = (int)(fmod(hit_y, TILE_WIDTH)/TILE_WIDTH * TEXTURE_SIZE) & (TEXTURE_SIZE - 1);
+
+                int x_ind_hit = (int)(floorf(hit_x / TILE_WIDTH));
+                int y_ind_hit = (int)(floorf(hit_y / TILE_WIDTH));
+                f32 x_rem_hit = hit_x - TILE_WIDTH*x_ind_hit;
+                f32 y_rem_hit = hit_y - TILE_WIDTH*y_ind_hit;
+                x_ind_hit = clamp(x_ind_hit, 0, MAPDATA.n_tiles_x-1);
+                y_ind_hit = clamp(y_ind_hit, 0, MAPDATA.n_tiles_y-1);
+
+                u32 texture_x_offset = 0;
+                u32 texture_y_offset = (MAPDATA.floor[GetMapDataIndex(&MAPDATA, x_ind_hit, y_ind_hit)] - 1) * TEXTURE_SIZE;
+
+                u32 texture_x = (int)(x_rem_hit/TILE_WIDTH * TEXTURE_SIZE);
+                u32 texture_y = (int)(y_rem_hit/TILE_WIDTH * TEXTURE_SIZE);
+                
                 u32 color = GetColumnMajorPixelAt(&BITMAP, texture_x+texture_x_offset, texture_y+texture_y_offset);
                 state.pixels[(y * SCREEN_SIZE_X) + x] = color;
 
@@ -441,8 +458,6 @@ static void Render() {
         }
 
         // Draw ceiling
-        texture_x_offset = 0;
-        texture_y_offset = 0;
         for (int y = SCREEN_SIZE_Y/2 + 1; y < SCREEN_SIZE_Y; y++) {
             // Radius
             f32 zpp = (y - (SCREEN_SIZE_Y/2.0f)) * (state.camera_height / SCREEN_SIZE_Y);
@@ -457,8 +472,19 @@ static void Render() {
             f32 step_y = radius * (ray_dir_hi_y - ray_dir_lo_y) / SCREEN_SIZE_X;
 
             for (int x = 0; x < SCREEN_SIZE_X; x++) {
-                u32 texture_x = (int)(fmod(hit_x, TILE_WIDTH)/TILE_WIDTH * TEXTURE_SIZE) & (TEXTURE_SIZE - 1);
-                u32 texture_y = (int)(fmod(hit_y, TILE_WIDTH)/TILE_WIDTH * TEXTURE_SIZE) & (TEXTURE_SIZE - 1);
+                int x_ind_hit = (int)(floorf(hit_x / TILE_WIDTH));
+                int y_ind_hit = (int)(floorf(hit_y / TILE_WIDTH));
+                f32 x_rem_hit = hit_x - TILE_WIDTH*x_ind_hit;
+                f32 y_rem_hit = hit_y - TILE_WIDTH*y_ind_hit;
+                x_ind_hit = clamp(x_ind_hit, 0, MAPDATA.n_tiles_x-1);
+                y_ind_hit = clamp(y_ind_hit, 0, MAPDATA.n_tiles_y-1);
+
+                u32 texture_x_offset = 0;
+                u32 texture_y_offset = (MAPDATA.ceiling[GetMapDataIndex(&MAPDATA, x_ind_hit, y_ind_hit)] - 1) * TEXTURE_SIZE;
+
+                u32 texture_x = (int)(x_rem_hit/TILE_WIDTH * TEXTURE_SIZE);
+                u32 texture_y = (int)(y_rem_hit/TILE_WIDTH * TEXTURE_SIZE);
+                
                 u32 color = GetColumnMajorPixelAt(&BITMAP, texture_x+texture_x_offset, texture_y+texture_y_offset);
                 state.pixels[(y * SCREEN_SIZE_X) + x] = color;
 
@@ -584,7 +610,7 @@ static void Render() {
             y_rem += dir.y * dt_best - TILE_WIDTH*dy_ind;
 
             // Check to see if the new cell is solid
-            if (GetMapDataAt(&MAPDATA, x_ind,y_ind) > 0) {
+            if (MAPDATA.tiles[GetMapDataIndex(&MAPDATA, x_ind, y_ind)] > 0) {
                 break;
             }
         }
@@ -608,7 +634,7 @@ static void Render() {
         {
             // Texture x offset determines whether we draw the light or dark version
             u32 texture_x_offset = dx_ind == 0 ? 0 : TEXTURE_SIZE;
-            u32 texture_y_offset = (GetMapDataAt(&MAPDATA, x_ind,y_ind) - 1) * TEXTURE_SIZE;
+            u32 texture_y_offset = (MAPDATA.tiles[GetMapDataIndex(&MAPDATA, x_ind,y_ind)] - 1) * TEXTURE_SIZE;
 
             f32 rem = 0.0f;
             if (dx_ind == 0) {
