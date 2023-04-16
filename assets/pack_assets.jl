@@ -3,8 +3,7 @@ using FileIO
 
 const N_BYTES_TOC_NAME = 16
 
-wall_textures = load("textures.tif")
-floor_textures = load("floor_textures.tif")
+textures = load("textures.tif")
 
 mapdata = UInt8[
     1 1 1 1 1 1 1 1 2 1 1 1 2;
@@ -117,16 +116,10 @@ open(output_file, "w") do output
 
 	# ADD CONTENT ---------------------------------------
 	push!(table_of_contents_entries, TableOfContentsEntry(
-		"wall_textures",
+		"textures",
 		offset_in_file
 	))
-	offset_in_file += write_image(wall_textures, output, column_major=true)
-
-	push!(table_of_contents_entries, TableOfContentsEntry(
-		"floor_textures",
-		offset_in_file
-	))
-	offset_in_file += write_image(floor_textures, output, column_major=true)
+	offset_in_file += write_image(textures, output, column_major=true)
 
 	push!(table_of_contents_entries, TableOfContentsEntry(
 		"mapdata",

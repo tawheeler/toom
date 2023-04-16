@@ -75,8 +75,7 @@ struct Bitmap {
 };
 
 // The bitmap global variables. These just point into the binary blob.
-struct Bitmap BITMAP_WALL;
-struct Bitmap BITMAP_FLOOR;
+struct Bitmap BITMAP;
 
 static inline int GetColumnMajorPixelIndex(struct Bitmap* bitmap, int x, int y) {
     return y + x*bitmap->n_pixels_per_column;
@@ -259,6 +258,9 @@ static void LoadAssets() {
         u32 n_toc_entries = *(u32*)(ASSETS_BINARY_BLOB + byte_index);
         ASSERT(ASSETS_BINARY_BLOB_SIZE > sizeof(struct BinaryAssetTableOfContentEntry) * n_toc_entries + 4, "Number of table of content entries is impossible given the number of bytes\n");
 
+        bool loaded_textures = 0;
+        bool loaded_mapdata = 0;
+
         // Scan through them in reverse order
         for (int i = n_toc_entries; i > 0; i--) {
             byte_index -= sizeof(struct BinaryAssetTableOfContentEntry);
@@ -268,28 +270,18 @@ static void LoadAssets() {
             printf("Entry %d: %s at offset %d\n", i, entry->name, entry->byte_offset);
 
             // In the future, load them into a map or something. For now, we're specifically looking for either the wall or floor textures.
-            if (strcmp(entry->name, "wall_textures") == 0) {
+            if (strcmp(entry->name, "textures") == 0) {
                 u32 asset_byte_offset = entry->byte_offset;
-                BITMAP_WALL.n_pixels            = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
+                BITMAP.n_pixels            = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
                 asset_byte_offset += sizeof(u32);
-                BITMAP_WALL.n_pixels_per_column = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
+                BITMAP.n_pixels_per_column = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
                 asset_byte_offset += sizeof(u32);
-                BITMAP_WALL.column_major = ASSETS_BINARY_BLOB[asset_byte_offset];
-                ASSERT(BITMAP_WALL.column_major, "Expected the wall texture to be column-major\n");
+                BITMAP.column_major = ASSETS_BINARY_BLOB[asset_byte_offset];
+                ASSERT(BITMAP.column_major, "Expected the wall texture to be column-major\n");
                 asset_byte_offset += sizeof(u8);
-                BITMAP_WALL.abgr = (u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
-                BITMAP_WALL.n_pixels_per_row = BITMAP_WALL.n_pixels / BITMAP_WALL.n_pixels_per_column;
-            } else if (strcmp(entry->name, "floor_textures") == 0) {
-                u32 asset_byte_offset = entry->byte_offset;
-                BITMAP_FLOOR.n_pixels            = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
-                asset_byte_offset += sizeof(u32);
-                BITMAP_FLOOR.n_pixels_per_column = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
-                asset_byte_offset += sizeof(u32);
-                BITMAP_FLOOR.column_major = ASSETS_BINARY_BLOB[asset_byte_offset];
-                ASSERT(BITMAP_FLOOR.column_major, "Expected the floor texture to be column-major\n");
-                asset_byte_offset += sizeof(u8);
-                BITMAP_FLOOR.abgr = (u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
-                BITMAP_FLOOR.n_pixels_per_row = BITMAP_FLOOR.n_pixels / BITMAP_FLOOR.n_pixels_per_column;
+                BITMAP.abgr = (u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
+                BITMAP.n_pixels_per_row = BITMAP.n_pixels / BITMAP.n_pixels_per_column;
+                loaded_textures = 1;
             } else if (strcmp(entry->name, "mapdata") == 0) {
                 u32 asset_byte_offset = entry->byte_offset;
                 MAPDATA.n_tiles = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
@@ -298,8 +290,12 @@ static void LoadAssets() {
                 asset_byte_offset += sizeof(u32);
                 MAPDATA.tiles = (u8*)(ASSETS_BINARY_BLOB + asset_byte_offset);
                 MAPDATA.n_tiles_y = MAPDATA.n_tiles / MAPDATA.n_tiles_x;
+                loaded_mapdata = 1;
             }
         }
+
+        ASSERT(loaded_textures > 0, "Textures not loaded from assets\n");
+        ASSERT(loaded_mapdata > 0, "Map data not loaded from assets\n");
     }
 }
 
@@ -435,7 +431,7 @@ static void Render() {
             for (int x = 0; x < SCREEN_SIZE_X; x++) {
                 u32 texture_x = (int)(fmod(hit_x, TILE_WIDTH)/TILE_WIDTH * TEXTURE_SIZE) & (TEXTURE_SIZE - 1);
                 u32 texture_y = (int)(fmod(hit_y, TILE_WIDTH)/TILE_WIDTH * TEXTURE_SIZE) & (TEXTURE_SIZE - 1);
-                u32 color = GetColumnMajorPixelAt(&BITMAP_FLOOR, texture_x+texture_x_offset, texture_y+texture_y_offset);
+                u32 color = GetColumnMajorPixelAt(&BITMAP, texture_x+texture_x_offset, texture_y+texture_y_offset);
                 state.pixels[(y * SCREEN_SIZE_X) + x] = color;
 
                 // step
@@ -463,7 +459,7 @@ static void Render() {
             for (int x = 0; x < SCREEN_SIZE_X; x++) {
                 u32 texture_x = (int)(fmod(hit_x, TILE_WIDTH)/TILE_WIDTH * TEXTURE_SIZE) & (TEXTURE_SIZE - 1);
                 u32 texture_y = (int)(fmod(hit_y, TILE_WIDTH)/TILE_WIDTH * TEXTURE_SIZE) & (TEXTURE_SIZE - 1);
-                u32 color = GetColumnMajorPixelAt(&BITMAP_FLOOR, texture_x+texture_x_offset, texture_y+texture_y_offset);
+                u32 color = GetColumnMajorPixelAt(&BITMAP, texture_x+texture_x_offset, texture_y+texture_y_offset);
                 state.pixels[(y * SCREEN_SIZE_X) + x] = color;
 
                 // step
@@ -482,7 +478,7 @@ static void Render() {
         //         f32 r = (WALL_HEIGHT - state.camera_z)*xpp/zpp;
         //         u32 texture_x = (int)(fmod(state.camera_pos.x + r*dir.x, TILE_WIDTH)/TILE_WIDTH * TEXTURE_SIZE);
         //         u32 texture_y = (int)(fmod(state.camera_pos.y + r*dir.y, TILE_WIDTH)/TILE_WIDTH * TEXTURE_SIZE);
-        //         u32 color = BITMAP_FLOOR.abgr[texture_y+texture_y_offset + (texture_x+texture_x_offset)*BITMAP_FLOOR.n_pixels_per_column];
+        //         u32 color = BITMAP.abgr[texture_y+texture_y_offset + (texture_x+texture_x_offset)*BITMAP.n_pixels_per_column];
         //         state.pixels[(y * SCREEN_SIZE_X) + x] = color;
         //     }
         // }
@@ -621,13 +617,13 @@ static void Render() {
                 rem = dx_ind < 0 ? y_rem : TILE_WIDTH - y_rem;
             }
             u32 texture_x = min((int) (TEXTURE_SIZE * rem / TILE_WIDTH), TEXTURE_SIZE-1);
-            u32 baseline = GetColumnMajorPixelIndex(&BITMAP_WALL, texture_x+texture_x_offset, texture_y_offset);
+            u32 baseline = GetColumnMajorPixelIndex(&BITMAP, texture_x+texture_x_offset, texture_y_offset);
             u32 denom = max(1, y_hi - y_lo);
             f32 y_loc = (f32)((y_hi - y_hi_capped) * TEXTURE_SIZE) / denom;
             f32 y_step = (f32)(TEXTURE_SIZE) / denom;
             for (int y = y_hi_capped; y >= y_lo_capped; y--) {
                 u32 texture_y = min((u32) (y_loc), TEXTURE_SIZE-1);
-                u32 color = BITMAP_WALL.abgr[texture_y+baseline];
+                u32 color = BITMAP.abgr[texture_y+baseline];
                 state.pixels[(y * SCREEN_SIZE_X) + x] = color;
                 y_loc += y_step;
             }
