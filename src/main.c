@@ -510,21 +510,6 @@ static void Render() {
                 hit_y += step_y;
             }
         }
-
-        // ORIGINAL CODE
-        // f32 x_side_frac = (x - SCREEN_SIZE_X/2.0f) / SCREEN_SIZE_X * state.camera_width; 
-        // f32 xpp = sqrt(1.0f + x_side_frac*x_side_frac);
-        // for (int y = y_hi_capped + 1; y < SCREEN_SIZE_Y; y++) {
-        //     if (y > SCREEN_SIZE_Y/2.0f) {
-        //         // NOTE: zpp is only positive if y > SCREEN_SIZE_Y/2
-        //         f32 zpp = (y - (SCREEN_SIZE_Y/2.0f)) * (state.camera_height / SCREEN_SIZE_Y);
-        //         f32 r = (WALL_HEIGHT - state.camera_z)*xpp/zpp;
-        //         u32 texture_x = (int)(fmod(state.camera_pos.x + r*dir.x, TILE_WIDTH)/TILE_WIDTH * TEXTURE_SIZE);
-        //         u32 texture_y = (int)(fmod(state.camera_pos.y + r*dir.y, TILE_WIDTH)/TILE_WIDTH * TEXTURE_SIZE);
-        //         u32 color = BITMAP.abgr[texture_y+texture_y_offset + (texture_x+texture_x_offset)*BITMAP.n_pixels_per_column];
-        //         state.pixels[(y * SCREEN_SIZE_X) + x] = color;
-        //     }
-        // }
     }
 
     // Get camera location's cell coordinates
