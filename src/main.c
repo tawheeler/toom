@@ -673,22 +673,25 @@ static void Render() {
 
     // Render objects
     {   
-        f32 s = state.camera_dir.y;
-        f32 c = state.camera_dir.x;
 
         v2 stick_pos = { 10.0f, 4.5f };
-        v2 stick_rel_camera = {stick_pos.x - state.camera_pos.x, stick_pos.y - state.camera_pos.y};
+        v2 stick_rel_camera = {
+            stick_pos.x - state.camera_pos.x,
+            stick_pos.y - state.camera_pos.y};
         f32 dist_to_player = length(stick_rel_camera);
 
+        f32 s = state.camera_dir.y;
+        f32 c = state.camera_dir.x;
         v2 stick_pos_cam_body = {
             c*stick_rel_camera.x + s*stick_rel_camera.y,
             c*stick_rel_camera.y - s*stick_rel_camera.x
         };
 
-        // Only render if they are on the postive side of the camera
+        // Only render if it is on the postive side of the camera
         if (stick_pos_cam_body.x > 1e-3) {
+
             // Calculate the column pixel bounds
-            f32 cam_len = 1.0; // TODO
+            const f32 cam_len = sqrt(1.0 + (stick_pos_cam_body.y / stick_pos_cam_body.x)*(stick_pos_cam_body.y / stick_pos_cam_body.x));
             int y_lo = (int)(SCREEN_SIZE_Y/2.0f - cam_len*state.camera_z/dist_to_player * SCREEN_SIZE_Y / state.camera_height);
             int y_hi = (int)(SCREEN_SIZE_Y/2.0f + cam_len*(WALL_HEIGHT - state.camera_z)/dist_to_player * SCREEN_SIZE_Y / state.camera_height);
             int y_lo_capped = max(y_lo, 0);
@@ -701,7 +704,7 @@ static void Render() {
             f32 x_step = ((f32)(TEXTURE_SIZE)/(x_column_hi - x_column_lo + 1));
             f32 x_loc = 0.0f;
             for (int x = x_column_lo; x <= x_column_hi; x++) {
-                
+
                 if (x >= 0 && x < SCREEN_SIZE_X && state.wall_raycast_radius[x] > dist_to_player) {
                     u32 texture_x = min((u32) (x_loc), TEXTURE_SIZE-1);
                     f32 y_loc = (f32)((y_hi - y_hi_capped) * TEXTURE_SIZE) / denom;
