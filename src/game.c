@@ -31,13 +31,6 @@ void Tick(
         input_rot_dir -= 1;
     }
 
-    // TODO - move out
-    // if (IsNewlyPressed(keyboard_state->r)) {
-    //     printf("Reloading assets.\n");
-    //     LoadAssets();
-    //     printf("DONE.\n");
-    // }
-
     if (IsPressed(keyboard_state->three)) {
         state->camera.z *= 0.95;
         printf("camera z: %.3f\n", state->camera.z);
