@@ -1,24 +1,12 @@
 #include <math.h>
 #include <stdio.h>
-#include <stdint.h>
 #include <sys/time.h>
 #include <SDL2/SDL.h>
 
-#define ASSERT(_e, ...) if (!(_e)) { fprintf(stderr, __VA_ARGS__); exit(1); }
+#include "typedefs.h"
+#include "game.h"
 
-typedef float f32;
-typedef double f64;
-typedef uint8_t bool;
-typedef uint8_t u8;
-typedef uint16_t u16;
-typedef uint32_t u32;
-typedef uint64_t u64;
-typedef int8_t i8;
-typedef int16_t i16;
-typedef int32_t i32;
-typedef int64_t i64;
-typedef size_t usize;
-typedef ssize_t isize;
+#define ASSERT(_e, ...) if (!(_e)) { fprintf(stderr, __VA_ARGS__); exit(1); }
 
 #define SCREEN_SIZE_X 640
 #define SCREEN_SIZE_Y 360
