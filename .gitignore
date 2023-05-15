@@ -1,6 +1,7 @@
 TOOM
 main.d
 obj
+*.d
 *.aux
 *.pdf
 *.log

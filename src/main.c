@@ -1,36 +1,15 @@
-#include <math.h>
 #include <stdio.h>
 #include <sys/time.h>
 #include <SDL2/SDL.h>
 
 #include "typedefs.h"
+#include "constants.h"
+#include "vec.h"
+#include "input.h"
+#include "bitmap.h"
 #include "game.h"
 
 #define ASSERT(_e, ...) if (!(_e)) { fprintf(stderr, __VA_ARGS__); exit(1); }
-
-#define SCREEN_SIZE_X 640
-#define SCREEN_SIZE_Y 360
-
-#define TILE_WIDTH 1.0f
-#define WALL_HEIGHT 1.0f
-
-#define TEXTURE_SIZE 64
-
-typedef struct v2_s {f32 x, y;} v2;
-
-#define dot(v0, v1) \
-    ({ const v2 _v0 = (v0), _v1 = (v1); (_v0.x * _v1.x) + (_v0.y * _v1.y); })
-#define length(v) ({ const v2 _v = (v); sqrtf(dot(_v, _v)); })
-#define normalize(u) ({           \
-        const v2 _u = (u);        \
-        const f32 l = length(_u); \
-        (v2) { _u.x/l, _u.y/l };  \
-    })
-#define rotr(v) ({ const v2 _v = (v); (v2) { -_v.y, _v.x }; })
-#define min(a, b) ({ __typeof__(a) _a = (a), _b = (b); _a < _b ? _a : _b; })
-#define max(a, b) ({ __typeof__(a) _a = (a), _b = (b); _a > _b ? _a : _b; })
-#define clamp(v, lo, hi) ({ __typeof__(v) _v = (v), _lo = (lo), _hi = (hi); _v > _hi ? _hi : (_v < _lo ? _lo : _v); })
-
 
 // Big binary assets blob that we load at init.
 u8* ASSETS_BINARY_BLOB = NULL;
@@ -57,142 +36,22 @@ static inline u8 GetMapDataIndex(struct Mapdata* mapdata, int x, int y) {
 // The global mapdata. This just points into our asset blob.
 struct Mapdata MAPDATA;
 
-struct Bitmap {
-    u32  n_pixels;
-    u32  n_pixels_per_column;
-    u32  n_pixels_per_row;
-    bool column_major;
-    u32* abgr;
-};
-
 // The bitmap global variables. These just point into the binary blob.
 struct Bitmap BITMAP;
 struct Bitmap BITMAP_STICK;
-
-static inline int GetColumnMajorPixelIndex(struct Bitmap* bitmap, int x, int y) {
-    return y + x*bitmap->n_pixels_per_column;
-}
-static inline int GetRowMajorPixelIndex(struct Bitmap* bitmap, int x, int y) {
-    return x + y*bitmap->n_pixels_per_row;
-}
-static inline u32 GetColumnMajorPixelAt(struct Bitmap* bitmap, int x, int y) {
-    return bitmap->abgr[y + x*bitmap->n_pixels_per_column];
-}
-static inline u32 GetRowMajorPixelAt(struct Bitmap* bitmap, int x, int y) {
-    return bitmap->abgr[x + y*bitmap->n_pixels_per_row];
-}
-
-enum KeyboardKeyState {
-    KeyboardKeyState_Depressed = 0, // No recent event, key is still up
-    KeyboardKeyState_Released = 1,  // Last event was a released event
-    KeyboardKeyState_Held = 2,      // No recent event, key is still down
-    KeyboardKeyState_Pressed = 3,    // Last event was a pressed event
-    KeyboardKeyState_COUNT = 4
-};
-
-struct KeyBoardState {
-    enum KeyboardKeyState up;
-    enum KeyboardKeyState down;
-    enum KeyboardKeyState right;
-    enum KeyboardKeyState left;
-    enum KeyboardKeyState a;
-    enum KeyboardKeyState s;
-    enum KeyboardKeyState d;
-    enum KeyboardKeyState w;
-    enum KeyboardKeyState q;
-    enum KeyboardKeyState e;
-    enum KeyboardKeyState r;
-
-    enum KeyboardKeyState one;
-    enum KeyboardKeyState two;
-    enum KeyboardKeyState three;
-    enum KeyboardKeyState four;
-    enum KeyboardKeyState five;
-    enum KeyboardKeyState six;
-    enum KeyboardKeyState seven;
-    enum KeyboardKeyState eight;
-};
-
-void ClearKeyboardState(struct KeyBoardState* kbs) {
-    kbs->up = KeyboardKeyState_Depressed;
-    kbs->down = KeyboardKeyState_Depressed;
-    kbs->right = KeyboardKeyState_Depressed;
-    kbs->left = KeyboardKeyState_Depressed;
-    kbs->a = KeyboardKeyState_Depressed;
-    kbs->s = KeyboardKeyState_Depressed;
-    kbs->d = KeyboardKeyState_Depressed;
-    kbs->w = KeyboardKeyState_Depressed;
-    kbs->q = KeyboardKeyState_Depressed;
-    kbs->e = KeyboardKeyState_Depressed;
-    kbs->r = KeyboardKeyState_Depressed;
-
-    kbs->one = KeyboardKeyState_Depressed;
-    kbs->two = KeyboardKeyState_Depressed;
-    kbs->three = KeyboardKeyState_Depressed;
-    kbs->four = KeyboardKeyState_Depressed;
-    kbs->five = KeyboardKeyState_Depressed;
-    kbs->six = KeyboardKeyState_Depressed;
-    kbs->seven = KeyboardKeyState_Depressed;
-    kbs->eight = KeyboardKeyState_Depressed;
-}
-
-void DecayKeyboardState(struct KeyBoardState* kbs) {
-    static enum KeyboardKeyState to_depressed_state[KeyboardKeyState_COUNT] = {
-        KeyboardKeyState_Depressed,
-        KeyboardKeyState_Depressed,
-        KeyboardKeyState_Held,
-        KeyboardKeyState_Held
-    };
-
-    kbs->up = to_depressed_state[kbs->up];
-    kbs->down =  to_depressed_state[kbs->down];
-    kbs->right = to_depressed_state[kbs->right];
-    kbs->left = to_depressed_state[kbs->left];
-    kbs->a = to_depressed_state[kbs->a];
-    kbs->s = to_depressed_state[kbs->s];
-    kbs->d = to_depressed_state[kbs->d];
-    kbs->w = to_depressed_state[kbs->w];
-    kbs->q = to_depressed_state[kbs->q];
-    kbs->e = to_depressed_state[kbs->e];
-    kbs->r = to_depressed_state[kbs->r];
-
-    kbs->one = to_depressed_state[kbs->one];
-    kbs->two = to_depressed_state[kbs->two];
-    kbs->three = to_depressed_state[kbs->three];
-    kbs->four = to_depressed_state[kbs->four];
-    kbs->five = to_depressed_state[kbs->five];
-    kbs->six = to_depressed_state[kbs->six];
-    kbs->seven = to_depressed_state[kbs->seven];
-    kbs->eight = to_depressed_state[kbs->eight];
-}
-
-bool IsPressed(enum KeyboardKeyState state) {
-    static bool lookup[KeyboardKeyState_COUNT] = {0, 0, 1, 1};
-    return lookup[state];
-}
-
-bool IsNewlyPressed(enum KeyboardKeyState state) {
-    return state == KeyboardKeyState_Pressed;
-}
 
 struct { 
     SDL_Window *window;
     SDL_Texture *texture;
     SDL_Renderer *renderer;
+
     u32 pixels[SCREEN_SIZE_X * SCREEN_SIZE_Y]; // row-major
+
     f32 wall_raycast_radius[SCREEN_SIZE_X];
+    
     bool quit;
 
-    v2 camera_pos;
-    v2 camera_dir;
-    v2 camera_dir_rotr;
-    f32 camera_width;
-    f32 camera_height;
-    f32 camera_z;
-
-    v2 player_speed;
-    f32 player_omega;
-
+    struct GameState game_state;
     struct KeyBoardState keyboard_state;
 } state;
 
@@ -311,125 +170,28 @@ static void LoadAssets() {
     }
 }
 
-static void Tick(f32 dt) {
-
-    v2 input_dir = {0.0, 0.0}; // In the body frame, which is right-handed, so y points left.
-    if (IsPressed(state.keyboard_state.w)) {
-        input_dir.x += 1.0;
-    }
-    if (IsPressed(state.keyboard_state.s)) {
-        input_dir.x -= 1.0;
-    }
-    if (IsPressed(state.keyboard_state.d)) {
-        input_dir.y -= 1.0;
-    }
-    if (IsPressed(state.keyboard_state.a)) {
-        input_dir.y += 1.0;
-    }
-
-    int input_rot_dir = 0; // Right-hand rotation in plane (CCW)
-    if (IsPressed(state.keyboard_state.q)) {
-        input_rot_dir += 1;
-    }
-    if (IsPressed(state.keyboard_state.e)) {
-        input_rot_dir -= 1;
-    }
-
-    if (IsNewlyPressed(state.keyboard_state.r)) {
-        printf("Reloading assets.\n");
-        LoadAssets();
-        printf("DONE.\n");
-    }
-
-    if (IsPressed(state.keyboard_state.three)) {
-        state.camera_z *= 0.95;
-        printf("camera z: %.3f\n", state.camera_z);
-    }
-    if (IsPressed(state.keyboard_state.four)) {
-        state.camera_z /= 0.95;
-        printf("camera z: %.3f\n", state.camera_z);
-    }
-    if (IsPressed(state.keyboard_state.five)) {
-        state.camera_height *= 0.95;
-        printf("camera height: %.3f\n", state.camera_height);
-    }
-    if (IsPressed(state.keyboard_state.six)) {
-        state.camera_height /= 0.95;
-        printf("camera height: %.3f\n", state.camera_height);
-    }
-    if (IsPressed(state.keyboard_state.seven)) {
-        state.camera_width *= 0.95;
-        printf("camera width: %.3f\n", state.camera_width);
-    }
-    if (IsPressed(state.keyboard_state.eight)) {
-        state.camera_width /= 0.95;
-        printf("camera width: %.3f\n", state.camera_width);
-    }
-
-    // Update the player's velocity
-    const f32 kPlayerInputAccel = 6.5;
-    const f32 kPlayerInputAngularAccel = 8.5;
-    const f32 kPlayerMaxSpeed = 5.0;
-    const f32 kPlayerMaxOmega = 5.0;
-    const f32 kAirFriction = 4.0;
-    const f32 kAirFrictionRot = 4.0;
-
-    // Note: Speed is in the global frame
-    state.player_speed.x += (state.camera_dir.x*input_dir.x + state.camera_dir_rotr.x*input_dir.y) * kPlayerInputAccel * dt;
-    state.player_speed.y += (state.camera_dir.y*input_dir.x + state.camera_dir_rotr.y*input_dir.y) * kPlayerInputAccel * dt;
-    state.player_omega += input_rot_dir * kPlayerInputAngularAccel * dt;
-
-    // Clamp the velocity to a maximum magnitude
-    f32 speed = length(state.player_speed);
-    if (speed > kPlayerMaxSpeed) {
-        state.player_speed.x *= kPlayerMaxSpeed / speed;
-        state.player_speed.y *= kPlayerMaxSpeed / speed;
-    }
-    if (state.player_omega > kPlayerMaxOmega) {
-        state.player_omega *= kPlayerMaxOmega / state.player_omega;
-    } else if (state.player_omega < -kPlayerMaxOmega) {
-        state.player_omega *= - kPlayerMaxOmega / state.player_omega;
-    }
-
-    // Update the player's position
-    state.camera_pos.x += state.player_speed.x * dt;
-    state.camera_pos.y += state.player_speed.y * dt;
-
-    // Update the player's rotational heading
-    f32 theta = atan2(state.camera_dir.y, state.camera_dir.x);
-    theta += state.player_omega * dt;
-    state.camera_dir = ((v2) {cos(theta), sin(theta)});   
-    state.camera_dir_rotr = rotr((state.camera_dir));
-
-    // Apply air friction
-    f32 air_friction_decay = exp(-kAirFriction * dt);
-    state.player_speed.x *= air_friction_decay;
-    state.player_speed.y *= air_friction_decay;
-    state.player_omega *= exp(-kAirFrictionRot * dt);
-}
-
 static void Render() {
     // Render the floor and ceiling textures
     {
 
         // Ray direction for x = 0
-        f32 half_camera_width = state.camera_width/2.0f;
-        f32 ray_dir_lo_x = state.camera_dir.x + half_camera_width*state.camera_dir_rotr.x;
-        f32 ray_dir_lo_y = state.camera_dir.y + half_camera_width*state.camera_dir_rotr.y;
+        f32 half_camera_width = state.game_state.camera.fov.x/2.0f;
+        f32 ray_dir_lo_x = state.game_state.camera.dir.x - half_camera_width*state.game_state.camera.dir.y;
+        f32 ray_dir_lo_y = state.game_state.camera.dir.y + half_camera_width*state.game_state.camera.dir.x;
 
         // Ray direction for x = SCREEN_SIZE_X
-        f32 ray_dir_hi_x = state.camera_dir.x - half_camera_width*state.camera_dir_rotr.x;
-        f32 ray_dir_hi_y = state.camera_dir.y - half_camera_width*state.camera_dir_rotr.y;        
+        f32 ray_dir_hi_x = state.game_state.camera.dir.x + half_camera_width*state.game_state.camera.dir.y;
+        f32 ray_dir_hi_y = state.game_state.camera.dir.y - half_camera_width*state.game_state.camera.dir.x;        
 
         // Draw floor
         for (int y = 0; y < SCREEN_SIZE_Y/2; y++) {
             // Radius
-            f32 zpp = (SCREEN_SIZE_Y/2.0f - y) * (state.camera_height / SCREEN_SIZE_Y);
-            f32 radius = state.camera_z/zpp;
+            f32 zpp = (SCREEN_SIZE_Y/2.0f - y) * (state.game_state.camera.fov.y / SCREEN_SIZE_Y);
+            f32 radius = state.game_state.camera.z / zpp;
 
             // Location of the 1st ray's intersection
-            f32 hit_x = state.camera_pos.x + radius * ray_dir_lo_x;
-            f32 hit_y = state.camera_pos.y + radius * ray_dir_lo_y;
+            f32 hit_x = state.game_state.camera.pos.x + radius * ray_dir_lo_x;
+            f32 hit_y = state.game_state.camera.pos.y + radius * ray_dir_lo_y;
 
             // Each step is (hit_x2 - hit_x) / SCREEN_SIZE_X;
             // = ((state.camera_pos.x + radius * ray_dir_lo_x) - (state.camera_pos.x + radius * ray_dir_lo_x)) / SCREEN_SIZE_X
@@ -465,12 +227,12 @@ static void Render() {
         // Draw ceiling
         for (int y = SCREEN_SIZE_Y/2 + 1; y < SCREEN_SIZE_Y; y++) {
             // Radius
-            f32 zpp = (y - (SCREEN_SIZE_Y/2.0f)) * (state.camera_height / SCREEN_SIZE_Y);
-            f32 radius = (WALL_HEIGHT - state.camera_z)/zpp;
+            f32 zpp = (y - (SCREEN_SIZE_Y/2.0f)) * (state.game_state.camera.fov.y / SCREEN_SIZE_Y);
+            f32 radius = (WALL_HEIGHT - state.game_state.camera.z)/zpp;
 
             // Location of the 1st ray's intersection
-            f32 hit_x = state.camera_pos.x + radius * ray_dir_lo_x;
-            f32 hit_y = state.camera_pos.y + radius * ray_dir_lo_y;
+            f32 hit_x = state.game_state.camera.pos.x + radius * ray_dir_lo_x;
+            f32 hit_y = state.game_state.camera.pos.y + radius * ray_dir_lo_y;
 
             // Each step toward hit2
             f32 step_x = radius * (ray_dir_hi_x - ray_dir_lo_x) / SCREEN_SIZE_X;
@@ -501,18 +263,18 @@ static void Render() {
     }
 
     // Get camera location's cell coordinates
-    int x_ind_cam = (int)(floorf(state.camera_pos.x / TILE_WIDTH));
-    int y_ind_cam = (int)(floorf(state.camera_pos.y / TILE_WIDTH));
-    f32 x_rem_cam = state.camera_pos.x - TILE_WIDTH*x_ind_cam;
-    f32 y_rem_cam = state.camera_pos.y - TILE_WIDTH*y_ind_cam;
+    int x_ind_cam = (int)(floorf(state.game_state.camera.pos.x / TILE_WIDTH));
+    int y_ind_cam = (int)(floorf(state.game_state.camera.pos.y / TILE_WIDTH));
+    f32 x_rem_cam = state.game_state.camera.pos.x - TILE_WIDTH*x_ind_cam;
+    f32 y_rem_cam = state.game_state.camera.pos.y - TILE_WIDTH*y_ind_cam;
 
     for (int x = 0; x < SCREEN_SIZE_X; x++) {
         
         // Camera to pixel column
-        const f32 dw = state.camera_width/2 - (state.camera_width*x)/SCREEN_SIZE_X;
+        const f32 dw = state.game_state.camera.fov.x/2 - (state.game_state.camera.fov.x*x)/SCREEN_SIZE_X;
         const v2 cp = {
-            state.camera_dir.x + dw*state.camera_dir_rotr.x,
-            state.camera_dir.y + dw*state.camera_dir_rotr.y
+            state.game_state.camera.dir.x - dw*state.game_state.camera.dir.y,
+            state.game_state.camera.dir.y + dw*state.game_state.camera.dir.x
         };
 
         // Distance from the camera to the column
@@ -612,12 +374,12 @@ static void Render() {
         };
 
         // Calculate the ray length
-        const f32 ray_len = length( ((v2) {collision.x - state.camera_pos.x, collision.y - state.camera_pos.y}) );
+        const f32 ray_len = length( ((v2) {collision.x - state.game_state.camera.pos.x, collision.y - state.game_state.camera.pos.y}) );
         state.wall_raycast_radius[x] = ray_len;
 
         // Calculate the pixel bounds that we fill the wall in for
-        int y_lo = (int)(SCREEN_SIZE_Y/2.0f - cam_len*state.camera_z/ray_len * SCREEN_SIZE_Y / state.camera_height);
-        int y_hi = (int)(SCREEN_SIZE_Y/2.0f + cam_len*(WALL_HEIGHT - state.camera_z)/ray_len * SCREEN_SIZE_Y / state.camera_height);
+        int y_lo = (int)(SCREEN_SIZE_Y/2.0f - cam_len*state.game_state.camera.z/ray_len * SCREEN_SIZE_Y / state.game_state.camera.fov.y);
+        int y_hi = (int)(SCREEN_SIZE_Y/2.0f + cam_len*(WALL_HEIGHT - state.game_state.camera.z)/ray_len * SCREEN_SIZE_Y / state.game_state.camera.fov.y);
         int y_lo_capped = max(y_lo, 0);
         int y_hi_capped = min(y_hi, SCREEN_SIZE_Y-1);
 
@@ -646,15 +408,14 @@ static void Render() {
 
     // Render objects
     {   
-
         v2 stick_pos = { 10.0f, 4.5f };
         v2 stick_rel_camera = {
-            stick_pos.x - state.camera_pos.x,
-            stick_pos.y - state.camera_pos.y};
+            stick_pos.x - state.game_state.camera.pos.x,
+            stick_pos.y - state.game_state.camera.pos.y};
         f32 dist_to_player = length(stick_rel_camera);
 
-        f32 s = state.camera_dir.y;
-        f32 c = state.camera_dir.x;
+        f32 s = state.game_state.camera.dir.y;
+        f32 c = state.game_state.camera.dir.x;
         v2 stick_pos_cam_body = {
             c*stick_rel_camera.x + s*stick_rel_camera.y,
             c*stick_rel_camera.y - s*stick_rel_camera.x
@@ -665,15 +426,15 @@ static void Render() {
 
             // Calculate the column pixel bounds
             const f32 cam_len = sqrt(1.0 + (stick_pos_cam_body.y / stick_pos_cam_body.x)*(stick_pos_cam_body.y / stick_pos_cam_body.x));
-            int y_lo = (int)(SCREEN_SIZE_Y/2.0f - cam_len*state.camera_z/dist_to_player * SCREEN_SIZE_Y / state.camera_height);
-            int y_hi = (int)(SCREEN_SIZE_Y/2.0f + cam_len*(WALL_HEIGHT - state.camera_z)/dist_to_player * SCREEN_SIZE_Y / state.camera_height);
+            int y_lo = (int)(SCREEN_SIZE_Y/2.0f - cam_len*state.game_state.camera.z/dist_to_player * SCREEN_SIZE_Y / state.game_state.camera.fov.y);
+            int y_hi = (int)(SCREEN_SIZE_Y/2.0f + cam_len*(WALL_HEIGHT - state.game_state.camera.z)/dist_to_player * SCREEN_SIZE_Y / state.game_state.camera.fov.y);
             int y_lo_capped = max(y_lo, 0);
             int y_hi_capped = min(y_hi, SCREEN_SIZE_Y-1);
             u32 denom = max(1, y_hi - y_lo);
             f32 y_step = (f32)(TEXTURE_SIZE) / denom;
 
-            int x_column_lo = (int)((0.5 - ((stick_pos_cam_body.y + TILE_WIDTH/2) / stick_pos_cam_body.x)/(state.camera_width))*SCREEN_SIZE_X);
-            int x_column_hi = (int)((0.5 - ((stick_pos_cam_body.y - TILE_WIDTH/2) / stick_pos_cam_body.x)/(state.camera_width))*SCREEN_SIZE_X);
+            int x_column_lo = (int)((0.5 - ((stick_pos_cam_body.y + TILE_WIDTH/2) / stick_pos_cam_body.x)/(state.game_state.camera.fov.x))*SCREEN_SIZE_X);
+            int x_column_hi = (int)((0.5 - ((stick_pos_cam_body.y - TILE_WIDTH/2) / stick_pos_cam_body.x)/(state.game_state.camera.fov.x))*SCREEN_SIZE_X);
             f32 x_step = ((f32)(TEXTURE_SIZE)/(x_column_hi - x_column_lo + 1));
             f32 x_loc = 0.0f;
             for (int x = x_column_lo; x <= x_column_hi; x++) {
@@ -735,16 +496,15 @@ int main(int argc, char *argv[]) {
     ASSERT(state.texture, "Error creating SDL texture: %s\n", SDL_GetError());
 
     // Init camera
-    state.camera_pos = (v2) { 5.0f, 5.0f };
-    state.camera_dir = ((v2) {cos(0.0), sin(0.0)});
-    state.camera_dir_rotr = rotr((state.camera_dir));
-    state.camera_width = 1.5f;
-    state.camera_height = state.camera_width * SCREEN_SIZE_Y / SCREEN_SIZE_X;
-    state.camera_z = 0.4;
+    state.game_state.camera.pos = (v2) { 5.0f, 5.0f };
+    state.game_state.camera.dir = ((v2) {cos(0.0), sin(0.0)});
+    state.game_state.camera.fov.x = 1.5f;
+    state.game_state.camera.fov.y = state.game_state.camera.fov.x * SCREEN_SIZE_Y / SCREEN_SIZE_X;
+    state.game_state.camera.z = 0.4;
 
     // Init player state
-    state.player_speed = (v2) { 0.0f, 0.0f };
-    state.player_omega = 0.0f;
+    state.game_state.player_speed = (v2) { 0.0f, 0.0f };
+    state.game_state.player_omega = 0.0f;
 
     // Init keyboard
     ClearKeyboardState(&state.keyboard_state);
@@ -817,7 +577,7 @@ int main(int argc, char *argv[]) {
         // Calc elapsed time since previous tick, then run tick
         gettimeofday(&timeval_tick, NULL);
         const f32 dt = GetElapsedTimeSec(&timeval_tick_prev, &timeval_tick);
-        Tick(dt);
+        Tick(&state.game_state, dt, &state.keyboard_state);
         timeval_tick_prev = timeval_tick;
 
         Render();

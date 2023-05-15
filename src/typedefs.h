@@ -1,3 +1,6 @@
+#ifndef TYPEDEFS_H_INCLUDED
+#define TYPEDEFS_H_INCLUDED
+
 #include <stdint.h>
 #include <stddef.h>
 
@@ -13,3 +16,5 @@ typedef int16_t i16;
 typedef int32_t i32;
 typedef int64_t i64;
 typedef size_t usize;
+
+#endif
