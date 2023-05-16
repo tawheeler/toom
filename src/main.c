@@ -262,15 +262,11 @@ void RenderFloorAndCeiling(
     }
 }
 
-
-void Render(
+void RenderWalls(
     u32* pixels,
     f32* wall_raycast_radius,
     struct CameraState* camera
 ) {
-    // Render the floor and ceiling textures
-    RenderFloorAndCeiling(pixels, camera);
-
     // Get camera location's cell coordinates
     int x_ind_cam = (int)(floorf(camera->pos.x / TILE_WIDTH));
     int y_ind_cam = (int)(floorf(camera->pos.y / TILE_WIDTH));
@@ -414,57 +410,70 @@ void Render(
             y_loc += y_step;
         }
     }
+}
 
-    // Render objects
-    {   
-        v2 stick_pos = { 10.0f, 4.5f };
-        v2 stick_rel_camera = {
-            stick_pos.x - camera->pos.x,
-            stick_pos.y - camera->pos.y};
-        f32 dist_to_player = length(stick_rel_camera);
+void RenderObjects(
+   u32* pixels,
+   f32* wall_raycast_radius,
+   struct CameraState* camera
+) {
+    v2 stick_pos = { 10.0f, 4.5f };
+    v2 stick_rel_camera = {
+        stick_pos.x - camera->pos.x,
+        stick_pos.y - camera->pos.y};
+    f32 dist_to_player = length(stick_rel_camera);
 
-        f32 s = camera->dir.y;
-        f32 c = camera->dir.x;
-        v2 stick_pos_cam_body = {
-            c*stick_rel_camera.x + s*stick_rel_camera.y,
-            c*stick_rel_camera.y - s*stick_rel_camera.x
-        };
+    f32 s = camera->dir.y;
+    f32 c = camera->dir.x;
+    v2 stick_pos_cam_body = {
+        c*stick_rel_camera.x + s*stick_rel_camera.y,
+        c*stick_rel_camera.y - s*stick_rel_camera.x
+    };
 
-        // Only render if it is on the postive side of the camera
-        if (stick_pos_cam_body.x > 1e-3) {
+    // Only render if it is on the postive side of the camera
+    if (stick_pos_cam_body.x > 1e-3) {
 
-            // Calculate the column pixel bounds
-            const f32 cam_len = sqrt(1.0 + (stick_pos_cam_body.y / stick_pos_cam_body.x)*(stick_pos_cam_body.y / stick_pos_cam_body.x));
-            int y_lo = (int)(SCREEN_SIZE_Y/2.0f - cam_len*camera->z/dist_to_player * SCREEN_SIZE_Y / camera->fov.y);
-            int y_hi = (int)(SCREEN_SIZE_Y/2.0f + cam_len*(WALL_HEIGHT - camera->z)/dist_to_player * SCREEN_SIZE_Y / camera->fov.y);
-            int y_lo_capped = max(y_lo, 0);
-            int y_hi_capped = min(y_hi, SCREEN_SIZE_Y-1);
-            u32 denom = max(1, y_hi - y_lo);
-            f32 y_step = (f32)(TEXTURE_SIZE) / denom;
+        // Calculate the column pixel bounds
+        const f32 cam_len = sqrt(1.0 + (stick_pos_cam_body.y / stick_pos_cam_body.x)*(stick_pos_cam_body.y / stick_pos_cam_body.x));
+        int y_lo = (int)(SCREEN_SIZE_Y/2.0f - cam_len*camera->z/dist_to_player * SCREEN_SIZE_Y / camera->fov.y);
+        int y_hi = (int)(SCREEN_SIZE_Y/2.0f + cam_len*(WALL_HEIGHT - camera->z)/dist_to_player * SCREEN_SIZE_Y / camera->fov.y);
+        int y_lo_capped = max(y_lo, 0);
+        int y_hi_capped = min(y_hi, SCREEN_SIZE_Y-1);
+        u32 denom = max(1, y_hi - y_lo);
+        f32 y_step = (f32)(TEXTURE_SIZE) / denom;
 
-            int x_column_lo = (int)((0.5 - ((stick_pos_cam_body.y + TILE_WIDTH/2) / stick_pos_cam_body.x)/(camera->fov.x))*SCREEN_SIZE_X);
-            int x_column_hi = (int)((0.5 - ((stick_pos_cam_body.y - TILE_WIDTH/2) / stick_pos_cam_body.x)/(camera->fov.x))*SCREEN_SIZE_X);
-            f32 x_step = ((f32)(TEXTURE_SIZE)/(x_column_hi - x_column_lo + 1));
-            f32 x_loc = 0.0f;
-            for (int x = x_column_lo; x <= x_column_hi; x++) {
+        int x_column_lo = (int)((0.5 - ((stick_pos_cam_body.y + TILE_WIDTH/2) / stick_pos_cam_body.x)/(camera->fov.x))*SCREEN_SIZE_X);
+        int x_column_hi = (int)((0.5 - ((stick_pos_cam_body.y - TILE_WIDTH/2) / stick_pos_cam_body.x)/(camera->fov.x))*SCREEN_SIZE_X);
+        f32 x_step = ((f32)(TEXTURE_SIZE)/(x_column_hi - x_column_lo + 1));
+        f32 x_loc = 0.0f;
+        for (int x = x_column_lo; x <= x_column_hi; x++) {
 
-                if (x >= 0 && x < SCREEN_SIZE_X && wall_raycast_radius[x] > dist_to_player) {
-                    u32 texture_x = min((u32) (x_loc), TEXTURE_SIZE-1);
-                    f32 y_loc = (f32)((y_hi - y_hi_capped) * TEXTURE_SIZE) / denom;
-                    for (int y = y_hi_capped; y >= y_lo_capped; y--) {
-                        u32 texture_y = min((u32) (y_loc), TEXTURE_SIZE-1);
-                        u32 color = GetColumnMajorPixelAt(&BITMAP_STICK, texture_x, texture_y);
-                        if ((color >> 24) > 0) {
-                            pixels[(y * SCREEN_SIZE_X) + x] = color;
-                        }
-                        y_loc += y_step;
+            if (x >= 0 && x < SCREEN_SIZE_X && wall_raycast_radius[x] > dist_to_player) {
+                u32 texture_x = min((u32) (x_loc), TEXTURE_SIZE-1);
+                f32 y_loc = (f32)((y_hi - y_hi_capped) * TEXTURE_SIZE) / denom;
+                for (int y = y_hi_capped; y >= y_lo_capped; y--) {
+                    u32 texture_y = min((u32) (y_loc), TEXTURE_SIZE-1);
+                    u32 color = GetColumnMajorPixelAt(&BITMAP_STICK, texture_x, texture_y);
+                    if ((color >> 24) > 0) {
+                        pixels[(y * SCREEN_SIZE_X) + x] = color;
                     }
+                    y_loc += y_step;
                 }
-
-                x_loc += x_step;
             }
+
+            x_loc += x_step;
         }
     }
+}
+
+void Render(
+    u32* pixels,
+    f32* wall_raycast_radius,
+    struct CameraState* camera
+) {
+    RenderFloorAndCeiling(pixels, camera);
+    RenderWalls(pixels, wall_raycast_radius, camera);
+    RenderObjects(pixels, wall_raycast_radius, camera);
 }
 
 int main(int argc, char *argv[]) {
@@ -491,9 +500,25 @@ int main(int argc, char *argv[]) {
         SDL_WINDOW_ALLOW_HIGHDPI);
     ASSERT(state.window, "Error creating SDL window: %s\n", SDL_GetError());
 
+    // Create a second window for debug
+    int debug_window_size_xy = SCREEN_SIZE_X;
+    SDL_Window* debug_window = SDL_CreateWindow(
+        "TOOM Debug", 
+        SDL_WINDOWPOS_UNDEFINED,
+        SDL_WINDOWPOS_UNDEFINED,
+        debug_window_size_xy,
+        debug_window_size_xy,
+        SDL_WINDOW_ALLOW_HIGHDPI);
+    ASSERT(debug_window, "Error creating SDL Debug window: %s\n", SDL_GetError());
+
     // Create a renderer
     state.renderer = SDL_CreateRenderer(state.window, -1, SDL_RENDERER_PRESENTVSYNC);
     ASSERT(state.renderer, "Error creating SDL renderer: %s\n", SDL_GetError());
+
+    // Create a second renderer for the debug window
+    SDL_Renderer* debug_renderer = SDL_CreateRenderer(debug_window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    ASSERT(state.renderer, "Error creating SDL Debug renderer: %s\n", SDL_GetError());
+    SDL_SetRenderDrawColor( debug_renderer, 0xFF, 0xFF, 0xFF, 0xFF ); //Initialize renderer color
 
     // Create a texture
     state.texture = SDL_CreateTexture(
@@ -618,13 +643,85 @@ int main(int argc, char *argv[]) {
             NULL,
             0.0,
             NULL,
-            SDL_FLIP_VERTICAL);        
+            SDL_FLIP_VERTICAL);
 
         // SDL_RENDERER_PRESENTVSYNC means this is syncronized with the monitor refresh rate. (30Hz)
         SDL_RenderPresent(state.renderer);
+
+        //Clear screen
+        SDL_SetRenderDrawColor( debug_renderer, 0xFF, 0xFF, 0xFF, 0xFF );
+        SDL_RenderClear( debug_renderer );
+
+        {
+            SDL_SetRenderDrawColor(debug_renderer, 0x1B, 0xA1, 0xEA, 0xFF);
+            f32 pix_per_tile = debug_window_size_xy / max(MAPDATA.n_tiles_x, MAPDATA.n_tiles_y);
+
+            f32 offset_x =  (debug_window_size_xy - pix_per_tile * MAPDATA.n_tiles_x) / 2.0;
+            f32 offset_y =  (debug_window_size_xy - pix_per_tile * MAPDATA.n_tiles_y) / 2.0;
+
+            // Render the walls
+            int grid_index = 0;
+            for (int y = 0; y < MAPDATA.n_tiles_y; y++) {
+                for (int x = 0; x < MAPDATA.n_tiles_x; x++) {
+                    if (MAPDATA.tiles[grid_index] > 0) {
+                        // This tile is a wall
+                        SDL_Rect rect;
+                        rect.x = (int)(pix_per_tile*x + offset_x);
+                        rect.y = (int)(pix_per_tile*y + offset_y);
+                        rect.h = (int)(pix_per_tile);
+                        rect.w = (int)(pix_per_tile);
+                        SDL_RenderFillRect(debug_renderer, &rect);
+                    }
+                    grid_index ++;
+                }
+            }
+
+            // Render the camera raycasts
+            SDL_SetRenderDrawColor(debug_renderer, 0xF5, 0x61, 0x5C, 0xFF);
+            struct CameraState* camera = &state.game_state.camera;
+            int camera_x = camera->pos.x / TILE_WIDTH * pix_per_tile + offset_x;
+            int camera_y = debug_window_size_xy - (camera->pos.y / TILE_WIDTH * pix_per_tile + offset_y);
+
+            for (int x = 0; x < SCREEN_SIZE_X; x++) {
+                f32 r = state.wall_raycast_radius[x];
+                
+                const f32 dw = camera->fov.x/2 - (camera->fov.x*x)/SCREEN_SIZE_X;
+                const v2 cp = {
+                    camera->dir.x - dw*camera->dir.y,
+                    camera->dir.y + dw*camera->dir.x
+                };
+                const f32 cam_len = length( (cp) );
+                const v2 dir = {cp.x / cam_len, cp.y / cam_len};
+
+                f32 camera_x1 = camera->pos.x + r * dir.x;
+                f32 camera_y1 = camera->pos.y + r * dir.y;
+                int camera_x2 = camera_x1 / TILE_WIDTH * pix_per_tile + offset_x;
+                int camera_y2 = debug_window_size_xy - (camera_y1 / TILE_WIDTH * pix_per_tile + offset_y);
+                SDL_RenderDrawLine(debug_renderer, camera_x, camera_y, camera_x2, camera_y2);
+            }
+
+            
+
+            // Render the camera
+            // SDL_SetRenderDrawColor(debug_renderer, 0xF5, 0x61, 0x5C, 0xFF);
+            // struct CameraState* camera = &state.game_state.camera;
+            // int camera_x = camera->pos.x / TILE_WIDTH * pix_per_tile + offset_x;
+            // int camera_y = debug_window_size_xy - (camera->pos.y / TILE_WIDTH * pix_per_tile + offset_y);
+
+            // f32 camera_fov = 1.0;
+            // f32 camera_x1 = camera->pos.x + camera->dir.x * camera_fov;
+            // f32 camera_y1 = camera->pos.y + camera->dir.y * camera_fov;
+            // int camera_x2 = camera_x1 / TILE_WIDTH * pix_per_tile + offset_x;
+            // int camera_y2 = debug_window_size_xy - (camera_y1 / TILE_WIDTH * pix_per_tile + offset_y);
+            // SDL_RenderDrawLine(debug_renderer, camera_x, camera_y, camera_x2, camera_y2);
+        }
+        
+
+        SDL_RenderPresent(debug_renderer);
     }
 
     SDL_DestroyWindow(state.window);
+    SDL_DestroyWindow(debug_window);
     
     // Free our assets
     free(ASSETS_BINARY_BLOB);

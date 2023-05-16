@@ -20,6 +20,6 @@ struct GameState {
 };
 
 // Propagate the game state forward by dt seconds.
-void Tick(struct GameState* state, f32 dt, struct KeyBoardState* keyboard_state);
+void Tick(struct GameState* state, f32 dt, const struct KeyBoardState* keyboard_state);
 
 #endif

@@ -6,7 +6,7 @@
 void Tick(
     struct GameState* state,
     f32 dt,
-    struct KeyBoardState* keyboard_state
+    const struct KeyBoardState* keyboard_state
 ) {
 
     v2 input_dir = {0.0, 0.0}; // In the body frame, which is right-handed, so y points left.
