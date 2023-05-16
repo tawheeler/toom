@@ -170,111 +170,120 @@ static void LoadAssets() {
     }
 }
 
-static void Render() {
-    // Render the floor and ceiling textures
-    {
+void RenderFloorAndCeiling(
+    u32* pixels,
+    struct CameraState* camera
+) {
+    // Ray direction for x = 0
+    f32 half_camera_width = camera->fov.x/2.0f;
+    f32 ray_dir_lo_x = camera->dir.x - half_camera_width*camera->dir.y;
+    f32 ray_dir_lo_y = camera->dir.y + half_camera_width*camera->dir.x;
 
-        // Ray direction for x = 0
-        f32 half_camera_width = state.game_state.camera.fov.x/2.0f;
-        f32 ray_dir_lo_x = state.game_state.camera.dir.x - half_camera_width*state.game_state.camera.dir.y;
-        f32 ray_dir_lo_y = state.game_state.camera.dir.y + half_camera_width*state.game_state.camera.dir.x;
+    // Ray direction for x = SCREEN_SIZE_X
+    f32 ray_dir_hi_x = camera->dir.x + half_camera_width*camera->dir.y;
+    f32 ray_dir_hi_y = camera->dir.y - half_camera_width*camera->dir.x;        
 
-        // Ray direction for x = SCREEN_SIZE_X
-        f32 ray_dir_hi_x = state.game_state.camera.dir.x + half_camera_width*state.game_state.camera.dir.y;
-        f32 ray_dir_hi_y = state.game_state.camera.dir.y - half_camera_width*state.game_state.camera.dir.x;        
+    // Draw floor
+    for (int y = 0; y < SCREEN_SIZE_Y/2; y++) {
+        // Radius
+        f32 zpp = (SCREEN_SIZE_Y/2.0f - y) * (camera->fov.y / SCREEN_SIZE_Y);
+        f32 radius = camera->z / zpp;
 
-        // Draw floor
-        for (int y = 0; y < SCREEN_SIZE_Y/2; y++) {
-            // Radius
-            f32 zpp = (SCREEN_SIZE_Y/2.0f - y) * (state.game_state.camera.fov.y / SCREEN_SIZE_Y);
-            f32 radius = state.game_state.camera.z / zpp;
+        // Location of the 1st ray's intersection
+        f32 hit_x = camera->pos.x + radius * ray_dir_lo_x;
+        f32 hit_y = camera->pos.y + radius * ray_dir_lo_y;
 
-            // Location of the 1st ray's intersection
-            f32 hit_x = state.game_state.camera.pos.x + radius * ray_dir_lo_x;
-            f32 hit_y = state.game_state.camera.pos.y + radius * ray_dir_lo_y;
+        // Each step is (hit_x2 - hit_x) / SCREEN_SIZE_X;
+        // = ((camera->pos.x + radius * ray_dir_lo_x) - (camera->pos.x + radius * ray_dir_lo_x)) / SCREEN_SIZE_X
+        // = (radius * ray_dir_lo_x - (radius * ray_dir_lo_x)) / SCREEN_SIZE_X
+        // = radius * (ray_dir_hi_x - ray_dir_lo_x) / SCREEN_SIZE_X
+        f32 step_x = radius * (ray_dir_hi_x - ray_dir_lo_x) / SCREEN_SIZE_X;
+        f32 step_y = radius * (ray_dir_hi_y - ray_dir_lo_y) / SCREEN_SIZE_X;
 
-            // Each step is (hit_x2 - hit_x) / SCREEN_SIZE_X;
-            // = ((state.camera_pos.x + radius * ray_dir_lo_x) - (state.camera_pos.x + radius * ray_dir_lo_x)) / SCREEN_SIZE_X
-            // = (radius * ray_dir_lo_x - (radius * ray_dir_lo_x)) / SCREEN_SIZE_X
-            // = radius * (ray_dir_hi_x - ray_dir_lo_x) / SCREEN_SIZE_X
-            f32 step_x = radius * (ray_dir_hi_x - ray_dir_lo_x) / SCREEN_SIZE_X;
-            f32 step_y = radius * (ray_dir_hi_y - ray_dir_lo_y) / SCREEN_SIZE_X;
+        for (int x = 0; x < SCREEN_SIZE_X; x++) {
 
-            for (int x = 0; x < SCREEN_SIZE_X; x++) {
+            int x_ind_hit = (int)(floorf(hit_x / TILE_WIDTH));
+            int y_ind_hit = (int)(floorf(hit_y / TILE_WIDTH));
+            f32 x_rem_hit = hit_x - TILE_WIDTH*x_ind_hit;
+            f32 y_rem_hit = hit_y - TILE_WIDTH*y_ind_hit;
+            x_ind_hit = clamp(x_ind_hit, 0, MAPDATA.n_tiles_x-1);
+            y_ind_hit = clamp(y_ind_hit, 0, MAPDATA.n_tiles_y-1);
 
-                int x_ind_hit = (int)(floorf(hit_x / TILE_WIDTH));
-                int y_ind_hit = (int)(floorf(hit_y / TILE_WIDTH));
-                f32 x_rem_hit = hit_x - TILE_WIDTH*x_ind_hit;
-                f32 y_rem_hit = hit_y - TILE_WIDTH*y_ind_hit;
-                x_ind_hit = clamp(x_ind_hit, 0, MAPDATA.n_tiles_x-1);
-                y_ind_hit = clamp(y_ind_hit, 0, MAPDATA.n_tiles_y-1);
+            u32 texture_x_offset = 0;
+            u32 texture_y_offset = (MAPDATA.floor[GetMapDataIndex(&MAPDATA, x_ind_hit, y_ind_hit)] - 1) * TEXTURE_SIZE;
 
-                u32 texture_x_offset = 0;
-                u32 texture_y_offset = (MAPDATA.floor[GetMapDataIndex(&MAPDATA, x_ind_hit, y_ind_hit)] - 1) * TEXTURE_SIZE;
+            u32 texture_x = (int)(x_rem_hit/TILE_WIDTH * TEXTURE_SIZE);
+            u32 texture_y = (int)(y_rem_hit/TILE_WIDTH * TEXTURE_SIZE);
+            
+            u32 color = GetColumnMajorPixelAt(&BITMAP, texture_x+texture_x_offset, texture_y+texture_y_offset);
+            pixels[(y * SCREEN_SIZE_X) + x] = color;
 
-                u32 texture_x = (int)(x_rem_hit/TILE_WIDTH * TEXTURE_SIZE);
-                u32 texture_y = (int)(y_rem_hit/TILE_WIDTH * TEXTURE_SIZE);
-                
-                u32 color = GetColumnMajorPixelAt(&BITMAP, texture_x+texture_x_offset, texture_y+texture_y_offset);
-                state.pixels[(y * SCREEN_SIZE_X) + x] = color;
-
-                // step
-                hit_x += step_x;
-                hit_y += step_y;
-            }
-        }
-
-        // Draw ceiling
-        for (int y = SCREEN_SIZE_Y/2 + 1; y < SCREEN_SIZE_Y; y++) {
-            // Radius
-            f32 zpp = (y - (SCREEN_SIZE_Y/2.0f)) * (state.game_state.camera.fov.y / SCREEN_SIZE_Y);
-            f32 radius = (WALL_HEIGHT - state.game_state.camera.z)/zpp;
-
-            // Location of the 1st ray's intersection
-            f32 hit_x = state.game_state.camera.pos.x + radius * ray_dir_lo_x;
-            f32 hit_y = state.game_state.camera.pos.y + radius * ray_dir_lo_y;
-
-            // Each step toward hit2
-            f32 step_x = radius * (ray_dir_hi_x - ray_dir_lo_x) / SCREEN_SIZE_X;
-            f32 step_y = radius * (ray_dir_hi_y - ray_dir_lo_y) / SCREEN_SIZE_X;
-
-            for (int x = 0; x < SCREEN_SIZE_X; x++) {
-                int x_ind_hit = (int)(floorf(hit_x / TILE_WIDTH));
-                int y_ind_hit = (int)(floorf(hit_y / TILE_WIDTH));
-                f32 x_rem_hit = hit_x - TILE_WIDTH*x_ind_hit;
-                f32 y_rem_hit = hit_y - TILE_WIDTH*y_ind_hit;
-                x_ind_hit = clamp(x_ind_hit, 0, MAPDATA.n_tiles_x-1);
-                y_ind_hit = clamp(y_ind_hit, 0, MAPDATA.n_tiles_y-1);
-
-                u32 texture_x_offset = 0;
-                u32 texture_y_offset = (MAPDATA.ceiling[GetMapDataIndex(&MAPDATA, x_ind_hit, y_ind_hit)] - 1) * TEXTURE_SIZE;
-
-                u32 texture_x = (int)(x_rem_hit/TILE_WIDTH * TEXTURE_SIZE);
-                u32 texture_y = (int)(y_rem_hit/TILE_WIDTH * TEXTURE_SIZE);
-                
-                u32 color = GetColumnMajorPixelAt(&BITMAP, texture_x+texture_x_offset, texture_y+texture_y_offset);
-                state.pixels[(y * SCREEN_SIZE_X) + x] = color;
-
-                // step
-                hit_x += step_x;
-                hit_y += step_y;
-            }
+            // step
+            hit_x += step_x;
+            hit_y += step_y;
         }
     }
 
+    // Draw ceiling
+    for (int y = SCREEN_SIZE_Y/2 + 1; y < SCREEN_SIZE_Y; y++) {
+        // Radius
+        f32 zpp = (y - (SCREEN_SIZE_Y/2.0f)) * (camera->fov.y / SCREEN_SIZE_Y);
+        f32 radius = (WALL_HEIGHT - camera->z)/zpp;
+
+        // Location of the 1st ray's intersection
+        f32 hit_x = camera->pos.x + radius * ray_dir_lo_x;
+        f32 hit_y = camera->pos.y + radius * ray_dir_lo_y;
+
+        // Each step toward hit2
+        f32 step_x = radius * (ray_dir_hi_x - ray_dir_lo_x) / SCREEN_SIZE_X;
+        f32 step_y = radius * (ray_dir_hi_y - ray_dir_lo_y) / SCREEN_SIZE_X;
+
+        for (int x = 0; x < SCREEN_SIZE_X; x++) {
+            int x_ind_hit = (int)(floorf(hit_x / TILE_WIDTH));
+            int y_ind_hit = (int)(floorf(hit_y / TILE_WIDTH));
+            f32 x_rem_hit = hit_x - TILE_WIDTH*x_ind_hit;
+            f32 y_rem_hit = hit_y - TILE_WIDTH*y_ind_hit;
+            x_ind_hit = clamp(x_ind_hit, 0, MAPDATA.n_tiles_x-1);
+            y_ind_hit = clamp(y_ind_hit, 0, MAPDATA.n_tiles_y-1);
+
+            u32 texture_x_offset = 0;
+            u32 texture_y_offset = (MAPDATA.ceiling[GetMapDataIndex(&MAPDATA, x_ind_hit, y_ind_hit)] - 1) * TEXTURE_SIZE;
+
+            u32 texture_x = (int)(x_rem_hit/TILE_WIDTH * TEXTURE_SIZE);
+            u32 texture_y = (int)(y_rem_hit/TILE_WIDTH * TEXTURE_SIZE);
+            
+            u32 color = GetColumnMajorPixelAt(&BITMAP, texture_x+texture_x_offset, texture_y+texture_y_offset);
+            pixels[(y * SCREEN_SIZE_X) + x] = color;
+
+            // step
+            hit_x += step_x;
+            hit_y += step_y;
+        }
+    }
+}
+
+
+void Render(
+    u32* pixels,
+    f32* wall_raycast_radius,
+    struct CameraState* camera
+) {
+    // Render the floor and ceiling textures
+    RenderFloorAndCeiling(pixels, camera);
+
     // Get camera location's cell coordinates
-    int x_ind_cam = (int)(floorf(state.game_state.camera.pos.x / TILE_WIDTH));
-    int y_ind_cam = (int)(floorf(state.game_state.camera.pos.y / TILE_WIDTH));
-    f32 x_rem_cam = state.game_state.camera.pos.x - TILE_WIDTH*x_ind_cam;
-    f32 y_rem_cam = state.game_state.camera.pos.y - TILE_WIDTH*y_ind_cam;
+    int x_ind_cam = (int)(floorf(camera->pos.x / TILE_WIDTH));
+    int y_ind_cam = (int)(floorf(camera->pos.y / TILE_WIDTH));
+    f32 x_rem_cam = camera->pos.x - TILE_WIDTH*x_ind_cam;
+    f32 y_rem_cam = camera->pos.y - TILE_WIDTH*y_ind_cam;
 
     for (int x = 0; x < SCREEN_SIZE_X; x++) {
         
         // Camera to pixel column
-        const f32 dw = state.game_state.camera.fov.x/2 - (state.game_state.camera.fov.x*x)/SCREEN_SIZE_X;
+        const f32 dw = camera->fov.x/2 - (camera->fov.x*x)/SCREEN_SIZE_X;
         const v2 cp = {
-            state.game_state.camera.dir.x - dw*state.game_state.camera.dir.y,
-            state.game_state.camera.dir.y + dw*state.game_state.camera.dir.x
+            camera->dir.x - dw*camera->dir.y,
+            camera->dir.y + dw*camera->dir.x
         };
 
         // Distance from the camera to the column
@@ -374,12 +383,12 @@ static void Render() {
         };
 
         // Calculate the ray length
-        const f32 ray_len = length( ((v2) {collision.x - state.game_state.camera.pos.x, collision.y - state.game_state.camera.pos.y}) );
-        state.wall_raycast_radius[x] = ray_len;
+        const f32 ray_len = length( ((v2) {collision.x - camera->pos.x, collision.y - camera->pos.y}) );
+        wall_raycast_radius[x] = ray_len;
 
         // Calculate the pixel bounds that we fill the wall in for
-        int y_lo = (int)(SCREEN_SIZE_Y/2.0f - cam_len*state.game_state.camera.z/ray_len * SCREEN_SIZE_Y / state.game_state.camera.fov.y);
-        int y_hi = (int)(SCREEN_SIZE_Y/2.0f + cam_len*(WALL_HEIGHT - state.game_state.camera.z)/ray_len * SCREEN_SIZE_Y / state.game_state.camera.fov.y);
+        int y_lo = (int)(SCREEN_SIZE_Y/2.0f - cam_len*camera->z/ray_len * SCREEN_SIZE_Y / camera->fov.y);
+        int y_hi = (int)(SCREEN_SIZE_Y/2.0f + cam_len*(WALL_HEIGHT - camera->z)/ray_len * SCREEN_SIZE_Y / camera->fov.y);
         int y_lo_capped = max(y_lo, 0);
         int y_hi_capped = min(y_hi, SCREEN_SIZE_Y-1);
 
@@ -401,7 +410,7 @@ static void Render() {
         for (int y = y_hi_capped; y >= y_lo_capped; y--) {
             u32 texture_y = min((u32) (y_loc), TEXTURE_SIZE-1);
             u32 color = BITMAP.abgr[texture_y+baseline];
-            state.pixels[(y * SCREEN_SIZE_X) + x] = color;
+            pixels[(y * SCREEN_SIZE_X) + x] = color;
             y_loc += y_step;
         }
     }
@@ -410,12 +419,12 @@ static void Render() {
     {   
         v2 stick_pos = { 10.0f, 4.5f };
         v2 stick_rel_camera = {
-            stick_pos.x - state.game_state.camera.pos.x,
-            stick_pos.y - state.game_state.camera.pos.y};
+            stick_pos.x - camera->pos.x,
+            stick_pos.y - camera->pos.y};
         f32 dist_to_player = length(stick_rel_camera);
 
-        f32 s = state.game_state.camera.dir.y;
-        f32 c = state.game_state.camera.dir.x;
+        f32 s = camera->dir.y;
+        f32 c = camera->dir.x;
         v2 stick_pos_cam_body = {
             c*stick_rel_camera.x + s*stick_rel_camera.y,
             c*stick_rel_camera.y - s*stick_rel_camera.x
@@ -426,27 +435,27 @@ static void Render() {
 
             // Calculate the column pixel bounds
             const f32 cam_len = sqrt(1.0 + (stick_pos_cam_body.y / stick_pos_cam_body.x)*(stick_pos_cam_body.y / stick_pos_cam_body.x));
-            int y_lo = (int)(SCREEN_SIZE_Y/2.0f - cam_len*state.game_state.camera.z/dist_to_player * SCREEN_SIZE_Y / state.game_state.camera.fov.y);
-            int y_hi = (int)(SCREEN_SIZE_Y/2.0f + cam_len*(WALL_HEIGHT - state.game_state.camera.z)/dist_to_player * SCREEN_SIZE_Y / state.game_state.camera.fov.y);
+            int y_lo = (int)(SCREEN_SIZE_Y/2.0f - cam_len*camera->z/dist_to_player * SCREEN_SIZE_Y / camera->fov.y);
+            int y_hi = (int)(SCREEN_SIZE_Y/2.0f + cam_len*(WALL_HEIGHT - camera->z)/dist_to_player * SCREEN_SIZE_Y / camera->fov.y);
             int y_lo_capped = max(y_lo, 0);
             int y_hi_capped = min(y_hi, SCREEN_SIZE_Y-1);
             u32 denom = max(1, y_hi - y_lo);
             f32 y_step = (f32)(TEXTURE_SIZE) / denom;
 
-            int x_column_lo = (int)((0.5 - ((stick_pos_cam_body.y + TILE_WIDTH/2) / stick_pos_cam_body.x)/(state.game_state.camera.fov.x))*SCREEN_SIZE_X);
-            int x_column_hi = (int)((0.5 - ((stick_pos_cam_body.y - TILE_WIDTH/2) / stick_pos_cam_body.x)/(state.game_state.camera.fov.x))*SCREEN_SIZE_X);
+            int x_column_lo = (int)((0.5 - ((stick_pos_cam_body.y + TILE_WIDTH/2) / stick_pos_cam_body.x)/(camera->fov.x))*SCREEN_SIZE_X);
+            int x_column_hi = (int)((0.5 - ((stick_pos_cam_body.y - TILE_WIDTH/2) / stick_pos_cam_body.x)/(camera->fov.x))*SCREEN_SIZE_X);
             f32 x_step = ((f32)(TEXTURE_SIZE)/(x_column_hi - x_column_lo + 1));
             f32 x_loc = 0.0f;
             for (int x = x_column_lo; x <= x_column_hi; x++) {
 
-                if (x >= 0 && x < SCREEN_SIZE_X && state.wall_raycast_radius[x] > dist_to_player) {
+                if (x >= 0 && x < SCREEN_SIZE_X && wall_raycast_radius[x] > dist_to_player) {
                     u32 texture_x = min((u32) (x_loc), TEXTURE_SIZE-1);
                     f32 y_loc = (f32)((y_hi - y_hi_capped) * TEXTURE_SIZE) / denom;
                     for (int y = y_hi_capped; y >= y_lo_capped; y--) {
                         u32 texture_y = min((u32) (y_loc), TEXTURE_SIZE-1);
                         u32 color = GetColumnMajorPixelAt(&BITMAP_STICK, texture_x, texture_y);
                         if ((color >> 24) > 0) {
-                            state.pixels[(y * SCREEN_SIZE_X) + x] = color;
+                            pixels[(y * SCREEN_SIZE_X) + x] = color;
                         }
                         y_loc += y_step;
                     }
@@ -580,8 +589,14 @@ int main(int argc, char *argv[]) {
         Tick(&state.game_state, dt, &state.keyboard_state);
         timeval_tick_prev = timeval_tick;
 
-        Render();
+        // Check for a kayboard press to reload our assets
+        if (IsNewlyPressed(state.keyboard_state.r)) {
+            printf("Reloading assets.\n");
+            LoadAssets();
+            printf("DONE.\n");
+        }
 
+        Render(state.pixels, state.wall_raycast_radius, &state.game_state.camera);
         DecayKeyboardState(&state.keyboard_state);
 
         // Get timer end for all the non-SDL stuff
