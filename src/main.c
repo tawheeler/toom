@@ -11,6 +11,7 @@
 
 #define ASSERT(_e, ...) if (!(_e)) { fprintf(stderr, __VA_ARGS__); exit(1); }
 
+// ------------------------------------------------------------------------------
 // Big binary assets blob that we load at init.
 u8* ASSETS_BINARY_BLOB = NULL;
 u32 ASSETS_BINARY_BLOB_SIZE = 0; // number of bytes
@@ -39,6 +40,34 @@ struct Mapdata MAPDATA;
 // The bitmap global variables. These just point into the binary blob.
 struct Bitmap BITMAP;
 struct Bitmap BITMAP_STICK;
+
+// ------------------------------------------------------------------------------
+// DOOM Assets
+
+u8* WAD = NULL;
+u32 WAD_SIZE = 0; // number of bytes
+
+struct WadDirectoryEntry {
+    u32 byte_offset;
+    u32 size;
+    char name[8];  
+};
+
+struct Patch {
+    u16 size_x;      // width of the graphic in pixels
+    u16 size_y;      // height of the graphic in pixels
+    i16 offset_x;    // x offset from the screen origin (to left)
+    i16 offset_y;    // y offset from the screen origin (down)
+    u32 column_offsets[64];
+};
+
+u32 IMP_PATCH_BYTE_OFFSET = 0;
+struct Patch* IMP_PATCH = NULL;
+
+
+
+
+// ------------------------------------------------------------------------------
 
 struct { 
     SDL_Window *window;
@@ -167,6 +196,45 @@ static void LoadAssets() {
 
         ASSERT(loaded_textures > 0, "Textures not loaded from assets\n");
         ASSERT(loaded_mapdata > 0, "Map data not loaded from assets\n");
+    }
+
+
+    // Load DOOM assets.
+    {
+        FILE* fileptr = fopen("assets/DOOM.WAD","rb");
+        ASSERT(fileptr, "Error opening DOOM WAD\n");
+        
+        // Count the number of bytes
+        fseek(fileptr, 0, SEEK_END);
+        WAD_SIZE = ftell(fileptr);
+        
+        // Read in the WAD file
+        fseek(fileptr, 0, SEEK_SET);
+        WAD = (u8*) malloc(WAD_SIZE);
+        ASSERT(WAD, "Failed to allocate DOOM WAD\n");
+        ASSERT(fread(WAD, sizeof(u8), WAD_SIZE, fileptr) == WAD_SIZE, "Failed to read DOOM WAD\n");
+
+        u32 n_lumps = *(u32*)(WAD + 0x04);
+        u32 dir_loc = *(u32*)(WAD + 0x08);
+
+        // Process the directory
+        bool loaded_imp_patch = 0;
+        u32 byte_index = dir_loc;
+        for (u32 directory_index = 0; directory_index < n_lumps; directory_index++) {
+            struct WadDirectoryEntry* entry = (struct WadDirectoryEntry*)(WAD + byte_index);
+            printf("Entry %d: %.8s at offset %d with size %d\n", directory_index, entry->name, entry->byte_offset, entry->size);
+            byte_index += sizeof(struct WadDirectoryEntry);
+
+            if (strcmp(entry->name, "TROOA1") == 0) {                
+                IMP_PATCH_BYTE_OFFSET = entry->byte_offset;
+                IMP_PATCH = (struct Patch*)(WAD + IMP_PATCH_BYTE_OFFSET);
+                loaded_imp_patch = 1;
+            }
+        }
+
+        fclose(fileptr);
+
+        ASSERT(loaded_imp_patch > 0, "Imp patch not loaded from assets\n");
     }
 }
 
@@ -725,6 +793,7 @@ int main(int argc, char *argv[]) {
     
     // Free our assets
     free(ASSETS_BINARY_BLOB);
+    free(WAD);
 
     return 0;
 }
