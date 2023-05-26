@@ -494,59 +494,29 @@ void RenderObjects(
    f32* wall_raycast_radius,
    struct CameraState* camera
 ) {
-    v2 stick_pos = { 10.0f, 4.5f };
-    v2 stick_rel_camera = {
-        stick_pos.x - camera->pos.x,
-        stick_pos.y - camera->pos.y};
-    f32 dist_to_player = length(stick_rel_camera);
+    v2 sprite_pos = { 10.0f, 4.5f };
+    v2 sprite_rel_camera = {
+        sprite_pos.x - camera->pos.x,
+        sprite_pos.y - camera->pos.y};
+    f32 dist_to_player = length(sprite_rel_camera);
 
     f32 s = camera->dir.y;
     f32 c = camera->dir.x;
-    v2 stick_pos_cam_body = {
-        c*stick_rel_camera.x + s*stick_rel_camera.y,
-        c*stick_rel_camera.y - s*stick_rel_camera.x
+    v2 sprite_pos_cam_body = {
+        c*sprite_rel_camera.x + s*sprite_rel_camera.y,
+        c*sprite_rel_camera.y - s*sprite_rel_camera.x
     };
 
     // Only render if it is on the postive side of the camera
-    if (stick_pos_cam_body.x > 1e-3) {
-
-        // Calculate the column pixel bounds
-        // const f32 cam_len = sqrt(1.0 + (stick_pos_cam_body.y / stick_pos_cam_body.x)*(stick_pos_cam_body.y / stick_pos_cam_body.x));
-        // int y_lo = (int)(SCREEN_SIZE_Y/2.0f - cam_len*camera->z/dist_to_player * SCREEN_SIZE_Y / camera->fov.y);
-        // int y_hi = (int)(SCREEN_SIZE_Y/2.0f + cam_len*(WALL_HEIGHT - camera->z)/dist_to_player * SCREEN_SIZE_Y / camera->fov.y);
-        // int y_lo_capped = max(y_lo, 0);
-        // int y_hi_capped = min(y_hi, SCREEN_SIZE_Y-1);
-        // u32 denom = max(1, y_hi - y_lo);
-        // f32 y_step = (f32)(TEXTURE_SIZE) / denom;
-
-        // int x_column_lo = (int)((0.5 - ((stick_pos_cam_body.y + TILE_WIDTH/2) / stick_pos_cam_body.x)/(camera->fov.x))*SCREEN_SIZE_X);
-        // int x_column_hi = (int)((0.5 - ((stick_pos_cam_body.y - TILE_WIDTH/2) / stick_pos_cam_body.x)/(camera->fov.x))*SCREEN_SIZE_X);
-        // f32 x_step = ((f32)(TEXTURE_SIZE)/(x_column_hi - x_column_lo + 1));
-        // f32 x_loc = 0.0f;
-        // for (int x = x_column_lo; x <= x_column_hi; x++) {
-
-        //     if (x >= 0 && x < SCREEN_SIZE_X && wall_raycast_radius[x] > dist_to_player) {
-        //         u32 texture_x = min((u32) (x_loc), TEXTURE_SIZE-1);
-        //         f32 y_loc = (f32)((y_hi - y_hi_capped) * TEXTURE_SIZE) / denom;
-        //         for (int y = y_hi_capped; y >= y_lo_capped; y--) {
-        //             u32 texture_y = min((u32) (y_loc), TEXTURE_SIZE-1);
-        //             u32 color = GetColumnMajorPixelAt(&BITMAP_STICK, texture_x, texture_y);
-        //             if ((color >> 24) > 0) {
-        //                 pixels[(y * SCREEN_SIZE_X) + x] = color;
-        //             }
-        //             y_loc += y_step;
-        //         }
-        //     }
-
-        //     x_loc += x_step;
-        // }
+    if (sprite_pos_cam_body.x > 1e-3) {
 
         f32 sprite_scale = 0.6;
-
+        f32 monster_heading = 0.0;
+        
         // Determine the sprite to use based on our viewing angle.
         f32 camera_heading = atan2(camera->dir.y, camera->dir.x); // TODO: inefficient
-        f32 monster_heading = 0.0;
-        f32 monster_heading_rel = camera_heading - monster_heading + PI/8.0;
+        f32 camera_relative_bearing = atan(sprite_pos_cam_body.y / sprite_pos_cam_body.x);
+        f32 monster_heading_rel = monster_heading + camera_heading + PI + PI/8.0;
         while (monster_heading_rel < 0) {
             monster_heading_rel += 2*PI;
         }
@@ -556,13 +526,10 @@ void RenderObjects(
         int monster_frame = (int)(monster_heading_rel * 8.0/(2.0*PI)) & 0x07;
         struct PatchEntry* patch_entry = &CYBR_PATCH_ENTRIES[monster_frame];
 
-        printf("CYBR: %.3f   %.3f\n", camera_heading, monster_heading);
-
-
         // Calculate the column pixel bounds
         u32 sprite_size_y = patch_entry->patch->size_y;
         f32 patch_height = ((f32)(sprite_scale * sprite_size_y)) / TEXTURE_SIZE; // TODO: Have to adjust via patch origin
-        const f32 cam_len = sqrt(1.0 + (stick_pos_cam_body.y / stick_pos_cam_body.x)*(stick_pos_cam_body.y / stick_pos_cam_body.x));
+        const f32 cam_len = sqrt(1.0 + (sprite_pos_cam_body.y / sprite_pos_cam_body.x)*(sprite_pos_cam_body.y / sprite_pos_cam_body.x));
         int y_lo = (int)(SCREEN_SIZE_Y/2.0f - cam_len*camera->z/dist_to_player * SCREEN_SIZE_Y / camera->fov.y);
         int y_hi = (int)(SCREEN_SIZE_Y/2.0f + cam_len*(patch_height - camera->z)/dist_to_player * SCREEN_SIZE_Y / camera->fov.y);
         int y_lo_capped = max(y_lo, 0);
@@ -572,8 +539,8 @@ void RenderObjects(
 
         u32 sprite_size_x = patch_entry->patch->size_x;  // TODO: Have to adjust via patch origin
         f32 patch_width = ((f32)(sprite_scale * sprite_size_x)) / TEXTURE_SIZE;
-        int x_column_lo = (int)((0.5 - ((stick_pos_cam_body.y + patch_width/2) / stick_pos_cam_body.x)/(camera->fov.x))*SCREEN_SIZE_X);
-        int x_column_hi = (int)((0.5 - ((stick_pos_cam_body.y - patch_width/2) / stick_pos_cam_body.x)/(camera->fov.x))*SCREEN_SIZE_X);
+        int x_column_lo = (int)((0.5 - ((sprite_pos_cam_body.y + patch_width/2) / sprite_pos_cam_body.x)/(camera->fov.x))*SCREEN_SIZE_X);
+        int x_column_hi = (int)((0.5 - ((sprite_pos_cam_body.y - patch_width/2) / sprite_pos_cam_body.x)/(camera->fov.x))*SCREEN_SIZE_X);
         f32 x_step = ((f32)(sprite_size_x)/(x_column_hi - x_column_lo + 1));
         f32 x_loc = 0.0f;
         for (int x = x_column_lo; x <= x_column_hi; x++) {
