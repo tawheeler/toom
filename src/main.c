@@ -53,6 +53,11 @@ struct WadDirectoryEntry {
     char name[8];  
 };
 
+//  Each palette in the PLAYPAL lump contains 256 colors totaling 768 bytes, 
+//  where each color is broken into three unsigned bytes. Each of these color components (red, green, and blue) range between 0 and 255.
+u32 PALETTE_OFFSET = 0;
+
+
 struct Patch {
     u16 size_x;      // width of the graphic in pixels
     u16 size_y;      // height of the graphic in pixels
@@ -61,10 +66,11 @@ struct Patch {
     u32 column_offsets[64];
 };
 
-u32 IMP_PATCH_BYTE_OFFSET = 0;
-struct Patch* IMP_PATCH = NULL;
-
-
+struct PatchEntry {
+    u32 byte_offset;
+    struct Patch* patch;    
+};
+struct PatchEntry CYBR_PATCH_ENTRIES[8];
 
 
 // ------------------------------------------------------------------------------
@@ -218,23 +224,26 @@ static void LoadAssets() {
         u32 dir_loc = *(u32*)(WAD + 0x08);
 
         // Process the directory
-        bool loaded_imp_patch = 0;
+        bool loaded_patch = 0;
         u32 byte_index = dir_loc;
         for (u32 directory_index = 0; directory_index < n_lumps; directory_index++) {
             struct WadDirectoryEntry* entry = (struct WadDirectoryEntry*)(WAD + byte_index);
-            printf("Entry %d: %.8s at offset %d with size %d\n", directory_index, entry->name, entry->byte_offset, entry->size);
+            // printf("Entry %d: %.8s at offset %d with size %d\n", directory_index, entry->name, entry->byte_offset, entry->size);
             byte_index += sizeof(struct WadDirectoryEntry);
 
-            if (strcmp(entry->name, "TROOA1") == 0) {                
-                IMP_PATCH_BYTE_OFFSET = entry->byte_offset;
-                IMP_PATCH = (struct Patch*)(WAD + IMP_PATCH_BYTE_OFFSET);
-                loaded_imp_patch = 1;
+            if (strcmp(entry->name, "PLAYPAL") == 0) { 
+                PALETTE_OFFSET = entry->byte_offset;
+            } else if (strncmp(entry->name, "CYBRE", 5) == 0) {
+                int frame_index = entry->name[5] - '1';
+                CYBR_PATCH_ENTRIES[frame_index].byte_offset = entry->byte_offset;
+                CYBR_PATCH_ENTRIES[frame_index].patch = (struct Patch*)(WAD + entry->byte_offset);
+                loaded_patch = 1;
             }
         }
 
         fclose(fileptr);
 
-        ASSERT(loaded_imp_patch > 0, "Imp patch not loaded from assets\n");
+        ASSERT(loaded_patch > 0, "Patch not loaded from assets\n");
     }
 }
 
@@ -502,29 +511,102 @@ void RenderObjects(
     if (stick_pos_cam_body.x > 1e-3) {
 
         // Calculate the column pixel bounds
+        // const f32 cam_len = sqrt(1.0 + (stick_pos_cam_body.y / stick_pos_cam_body.x)*(stick_pos_cam_body.y / stick_pos_cam_body.x));
+        // int y_lo = (int)(SCREEN_SIZE_Y/2.0f - cam_len*camera->z/dist_to_player * SCREEN_SIZE_Y / camera->fov.y);
+        // int y_hi = (int)(SCREEN_SIZE_Y/2.0f + cam_len*(WALL_HEIGHT - camera->z)/dist_to_player * SCREEN_SIZE_Y / camera->fov.y);
+        // int y_lo_capped = max(y_lo, 0);
+        // int y_hi_capped = min(y_hi, SCREEN_SIZE_Y-1);
+        // u32 denom = max(1, y_hi - y_lo);
+        // f32 y_step = (f32)(TEXTURE_SIZE) / denom;
+
+        // int x_column_lo = (int)((0.5 - ((stick_pos_cam_body.y + TILE_WIDTH/2) / stick_pos_cam_body.x)/(camera->fov.x))*SCREEN_SIZE_X);
+        // int x_column_hi = (int)((0.5 - ((stick_pos_cam_body.y - TILE_WIDTH/2) / stick_pos_cam_body.x)/(camera->fov.x))*SCREEN_SIZE_X);
+        // f32 x_step = ((f32)(TEXTURE_SIZE)/(x_column_hi - x_column_lo + 1));
+        // f32 x_loc = 0.0f;
+        // for (int x = x_column_lo; x <= x_column_hi; x++) {
+
+        //     if (x >= 0 && x < SCREEN_SIZE_X && wall_raycast_radius[x] > dist_to_player) {
+        //         u32 texture_x = min((u32) (x_loc), TEXTURE_SIZE-1);
+        //         f32 y_loc = (f32)((y_hi - y_hi_capped) * TEXTURE_SIZE) / denom;
+        //         for (int y = y_hi_capped; y >= y_lo_capped; y--) {
+        //             u32 texture_y = min((u32) (y_loc), TEXTURE_SIZE-1);
+        //             u32 color = GetColumnMajorPixelAt(&BITMAP_STICK, texture_x, texture_y);
+        //             if ((color >> 24) > 0) {
+        //                 pixels[(y * SCREEN_SIZE_X) + x] = color;
+        //             }
+        //             y_loc += y_step;
+        //         }
+        //     }
+
+        //     x_loc += x_step;
+        // }
+
+        f32 sprite_scale = 0.6;
+
+        // Determine the sprite to use based on our viewing angle.
+        f32 camera_heading = atan2(camera->dir.y, camera->dir.x); // TODO: inefficient
+        f32 monster_heading = 0.0;
+        f32 monster_heading_rel = camera_heading - monster_heading + PI/8.0;
+        while (monster_heading_rel < 0) {
+            monster_heading_rel += 2*PI;
+        }
+        while (monster_heading_rel > 2*PI) {
+            monster_heading_rel -= 2*PI;
+        }
+        int monster_frame = (int)(monster_heading_rel * 8.0/(2.0*PI)) & 0x07;
+        struct PatchEntry* patch_entry = &CYBR_PATCH_ENTRIES[monster_frame];
+
+        printf("CYBR: %.3f   %.3f\n", camera_heading, monster_heading);
+
+
+        // Calculate the column pixel bounds
+        u32 sprite_size_y = patch_entry->patch->size_y;
+        f32 patch_height = ((f32)(sprite_scale * sprite_size_y)) / TEXTURE_SIZE; // TODO: Have to adjust via patch origin
         const f32 cam_len = sqrt(1.0 + (stick_pos_cam_body.y / stick_pos_cam_body.x)*(stick_pos_cam_body.y / stick_pos_cam_body.x));
         int y_lo = (int)(SCREEN_SIZE_Y/2.0f - cam_len*camera->z/dist_to_player * SCREEN_SIZE_Y / camera->fov.y);
-        int y_hi = (int)(SCREEN_SIZE_Y/2.0f + cam_len*(WALL_HEIGHT - camera->z)/dist_to_player * SCREEN_SIZE_Y / camera->fov.y);
+        int y_hi = (int)(SCREEN_SIZE_Y/2.0f + cam_len*(patch_height - camera->z)/dist_to_player * SCREEN_SIZE_Y / camera->fov.y);
         int y_lo_capped = max(y_lo, 0);
         int y_hi_capped = min(y_hi, SCREEN_SIZE_Y-1);
         u32 denom = max(1, y_hi - y_lo);
-        f32 y_step = (f32)(TEXTURE_SIZE) / denom;
+        f32 y_step = (f32)(sprite_size_y) / denom;
 
-        int x_column_lo = (int)((0.5 - ((stick_pos_cam_body.y + TILE_WIDTH/2) / stick_pos_cam_body.x)/(camera->fov.x))*SCREEN_SIZE_X);
-        int x_column_hi = (int)((0.5 - ((stick_pos_cam_body.y - TILE_WIDTH/2) / stick_pos_cam_body.x)/(camera->fov.x))*SCREEN_SIZE_X);
-        f32 x_step = ((f32)(TEXTURE_SIZE)/(x_column_hi - x_column_lo + 1));
+        u32 sprite_size_x = patch_entry->patch->size_x;  // TODO: Have to adjust via patch origin
+        f32 patch_width = ((f32)(sprite_scale * sprite_size_x)) / TEXTURE_SIZE;
+        int x_column_lo = (int)((0.5 - ((stick_pos_cam_body.y + patch_width/2) / stick_pos_cam_body.x)/(camera->fov.x))*SCREEN_SIZE_X);
+        int x_column_hi = (int)((0.5 - ((stick_pos_cam_body.y - patch_width/2) / stick_pos_cam_body.x)/(camera->fov.x))*SCREEN_SIZE_X);
+        f32 x_step = ((f32)(sprite_size_x)/(x_column_hi - x_column_lo + 1));
         f32 x_loc = 0.0f;
         for (int x = x_column_lo; x <= x_column_hi; x++) {
 
             if (x >= 0 && x < SCREEN_SIZE_X && wall_raycast_radius[x] > dist_to_player) {
-                u32 texture_x = min((u32) (x_loc), TEXTURE_SIZE-1);
-                f32 y_loc = (f32)((y_hi - y_hi_capped) * TEXTURE_SIZE) / denom;
+                u32 texture_x = min((u32) (x_loc), sprite_size_x-1);
+
+                // Grab the column.
+                u32 column_offset = patch_entry->patch->column_offsets[texture_x];
+
+                // Grab the first post.
+                u8 y_texture_skip = WAD[patch_entry->byte_offset + column_offset];
+                u8 y_pix_in_col = WAD[patch_entry->byte_offset + column_offset + 1];
+
+                f32 y_loc = (f32)((y_hi - y_hi_capped) * sprite_size_y) / denom;
                 for (int y = y_hi_capped; y >= y_lo_capped; y--) {
-                    u32 texture_y = min((u32) (y_loc), TEXTURE_SIZE-1);
-                    u32 color = GetColumnMajorPixelAt(&BITMAP_STICK, texture_x, texture_y);
-                    if ((color >> 24) > 0) {
+                    u32 texture_y = min((u32) (y_loc), sprite_size_y-1);
+
+                    if (texture_y > y_texture_skip && texture_y <= y_texture_skip + y_pix_in_col) {
+                        // TODO: Get pixel.
+                        // u32 color = GetColumnMajorPixelAt(&BITMAP_STICK, texture_x, texture_y);
+                        u8 color_index = WAD[patch_entry->byte_offset + column_offset + 3 + texture_y - y_texture_skip];  // Index into the DOOM color palette.
+                        u32 color = *(u32*)(WAD + PALETTE_OFFSET + 3*color_index);
+                        color |= 0xFF000000; // Set alpha to full.
                         pixels[(y * SCREEN_SIZE_X) + x] = color;
                     }
+                    if (texture_y >= y_texture_skip + y_pix_in_col) {
+                        // Grab the next column, if possible.
+                        column_offset += 4 + y_pix_in_col;
+                        y_texture_skip = WAD[patch_entry->byte_offset + column_offset];
+                        y_pix_in_col = WAD[patch_entry->byte_offset + column_offset + 1];
+                    }
+                    
                     y_loc += y_step;
                 }
             }
@@ -767,21 +849,6 @@ int main(int argc, char *argv[]) {
                 int camera_y2 = debug_window_size_xy - (camera_y1 / TILE_WIDTH * pix_per_tile + offset_y);
                 SDL_RenderDrawLine(debug_renderer, camera_x, camera_y, camera_x2, camera_y2);
             }
-
-            
-
-            // Render the camera
-            // SDL_SetRenderDrawColor(debug_renderer, 0xF5, 0x61, 0x5C, 0xFF);
-            // struct CameraState* camera = &state.game_state.camera;
-            // int camera_x = camera->pos.x / TILE_WIDTH * pix_per_tile + offset_x;
-            // int camera_y = debug_window_size_xy - (camera->pos.y / TILE_WIDTH * pix_per_tile + offset_y);
-
-            // f32 camera_fov = 1.0;
-            // f32 camera_x1 = camera->pos.x + camera->dir.x * camera_fov;
-            // f32 camera_y1 = camera->pos.y + camera->dir.y * camera_fov;
-            // int camera_x2 = camera_x1 / TILE_WIDTH * pix_per_tile + offset_x;
-            // int camera_y2 = debug_window_size_xy - (camera_y1 / TILE_WIDTH * pix_per_tile + offset_y);
-            // SDL_RenderDrawLine(debug_renderer, camera_x, camera_y, camera_x2, camera_y2);
         }
         
 

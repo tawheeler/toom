@@ -9,4 +9,6 @@
 
 #define TEXTURE_SIZE 64
 
+#define PI 3.1415926535
+
 #endif
