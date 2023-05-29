@@ -72,6 +72,16 @@ struct PatchEntry {
 };
 struct PatchEntry CYBR_PATCH_ENTRIES[8];
 
+// Every sprite has some number of frames that can be drawn,
+// where a frame can be rendered from 8 different angles.
+// Each frame has an index.
+// We should probably store them all in one big list.
+
+// Then monsters can just point to which frame index they want to render.
+
+// struct Frame {
+//     struct PatchEntry patches[8]; // The 8 viewing angles.
+// };
 
 // ------------------------------------------------------------------------------
 
@@ -515,7 +525,6 @@ void RenderObjects(
         
         // Determine the sprite to use based on our viewing angle.
         f32 camera_heading = atan2(camera->dir.y, camera->dir.x); // TODO: inefficient
-        f32 camera_relative_bearing = atan(sprite_pos_cam_body.y / sprite_pos_cam_body.x);
         f32 monster_heading_rel = monster_heading + camera_heading + PI + PI/8.0;
         while (monster_heading_rel < 0) {
             monster_heading_rel += 2*PI;
@@ -559,7 +568,12 @@ void RenderObjects(
                 for (int y = y_hi_capped; y >= y_lo_capped; y--) {
                     u32 texture_y = min((u32) (y_loc), sprite_size_y-1);
 
-                    if (texture_y > y_texture_skip && texture_y <= y_texture_skip + y_pix_in_col) {
+                    if (texture_y > y_texture_skip + y_pix_in_col) {
+                        // Grab the next column, if possible.
+                        column_offset += 4 + y_pix_in_col;
+                        y_texture_skip = WAD[patch_entry->byte_offset + column_offset];
+                        y_pix_in_col = WAD[patch_entry->byte_offset + column_offset + 1];
+                    } else if (texture_y > y_texture_skip) {
                         // TODO: Get pixel.
                         // u32 color = GetColumnMajorPixelAt(&BITMAP_STICK, texture_x, texture_y);
                         u8 color_index = WAD[patch_entry->byte_offset + column_offset + 3 + texture_y - y_texture_skip];  // Index into the DOOM color palette.
@@ -567,12 +581,7 @@ void RenderObjects(
                         color |= 0xFF000000; // Set alpha to full.
                         pixels[(y * SCREEN_SIZE_X) + x] = color;
                     }
-                    if (texture_y >= y_texture_skip + y_pix_in_col) {
-                        // Grab the next column, if possible.
-                        column_offset += 4 + y_pix_in_col;
-                        y_texture_skip = WAD[patch_entry->byte_offset + column_offset];
-                        y_pix_in_col = WAD[patch_entry->byte_offset + column_offset + 1];
-                    }
+                    
                     
                     y_loc += y_step;
                 }
@@ -816,6 +825,35 @@ int main(int argc, char *argv[]) {
                 int camera_y2 = debug_window_size_xy - (camera_y1 / TILE_WIDTH * pix_per_tile + offset_y);
                 SDL_RenderDrawLine(debug_renderer, camera_x, camera_y, camera_x2, camera_y2);
             }
+
+            // Render the monster
+            SDL_SetRenderDrawColor(debug_renderer, 0x00, 0x00, 0x00, 0xFF);
+            v2 sprite_pos = { 10.0f, 4.5f };
+            f32 sprite_halfwidth = 0.5;
+
+            // f32 sprite_heading = 0.0;
+            // const v2 sprite_tangent = {
+            //     sin(sprite_heading),
+            //     cos(sprite_heading)
+            // };
+            const v2 sprite_tangent = {
+                 camera->dir.y,
+                -camera->dir.x
+            };
+
+            const v2 a = {
+                sprite_pos.x + sprite_halfwidth*sprite_tangent.x,
+                sprite_pos.y + sprite_halfwidth*sprite_tangent.y
+            };
+            const v2 b = {
+                sprite_pos.x - sprite_halfwidth*sprite_tangent.x,
+                sprite_pos.y - sprite_halfwidth*sprite_tangent.y
+            };
+            int ax = a.x / TILE_WIDTH * pix_per_tile + offset_x;
+            int ay = debug_window_size_xy - (a.y / TILE_WIDTH * pix_per_tile + offset_y);
+            int bx = b.x / TILE_WIDTH * pix_per_tile + offset_x;
+            int by = debug_window_size_xy - (b.y / TILE_WIDTH * pix_per_tile + offset_y);
+            SDL_RenderDrawLine(debug_renderer, ax, ay, bx, by);
         }
         
 
