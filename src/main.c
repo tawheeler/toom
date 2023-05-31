@@ -543,11 +543,11 @@ void RenderObjects(
         u32 denom = max(1, y_hi - y_lo);
         f32 y_step = (f32)(sprite_size_y) / denom;
 
-        int sprite_size_x = patch_entry->patch->size_x;  // TODO: Have to adjust via patch origin
-        f32 patch_width = DOOM_HEIGHT_PER_PIX * sprite_size_x;
-        // f32 patch_x_offset = DOOM_HEIGHT_PER_PIX * (patch_entry->patch->offset_x - sprite_size_x); // Where the center of the sprite is
-        int x_column_lo = (int)((0.5 - ((sprite_pos_cam_body.y + patch_width/2) / sprite_pos_cam_body.x)/(camera->fov.x))*SCREEN_SIZE_X);
-        int x_column_hi = (int)((0.5 - ((sprite_pos_cam_body.y - patch_width/2) / sprite_pos_cam_body.x)/(camera->fov.x))*SCREEN_SIZE_X);
+        int sprite_size_x = patch_entry->patch->size_x;
+        f32 patch_halfwidth = DOOM_HEIGHT_PER_PIX * sprite_size_x / 2.0f;
+        f32 patch_x_offset = DOOM_HEIGHT_PER_PIX * (patch_entry->patch->offset_x - 0.5f*sprite_size_x);
+        int x_column_lo = (int)((0.5 - ((sprite_pos_cam_body.y + patch_x_offset + patch_halfwidth) / sprite_pos_cam_body.x)/(camera->fov.x))*SCREEN_SIZE_X);
+        int x_column_hi = (int)((0.5 - ((sprite_pos_cam_body.y + patch_x_offset - patch_halfwidth) / sprite_pos_cam_body.x)/(camera->fov.x))*SCREEN_SIZE_X);
         f32 x_step = ((f32)(sprite_size_x)/(x_column_hi - x_column_lo + 1));
         f32 x_loc = 0.0f;
         for (int x = x_column_lo; x <= x_column_hi; x++) {
