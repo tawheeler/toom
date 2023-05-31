@@ -9,6 +9,9 @@
 
 #define TEXTURE_SIZE 64
 
+// If a DOOM sprite is this many pixels, then it equals one wall width.
+#define DOOM_PIX_PER_WALL_WIDTH 40
+
 #define PI 3.1415926535
 
 #endif

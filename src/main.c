@@ -504,6 +504,10 @@ void RenderObjects(
    f32* wall_raycast_radius,
    struct CameraState* camera
 ) {
+    static f32 DOOM_HEIGHT_PER_PIX = ((f32)(DOOM_PIX_PER_WALL_WIDTH)) / (TEXTURE_SIZE*TEXTURE_SIZE);
+
+    f32 camera_heading = atan2(camera->dir.y, camera->dir.x); // TODO: inefficient
+
     v2 sprite_pos = { 10.0f, 4.5f };
     v2 sprite_rel_camera = {
         sprite_pos.x - camera->pos.x,
@@ -519,35 +523,29 @@ void RenderObjects(
 
     // Only render if it is on the postive side of the camera
     if (sprite_pos_cam_body.x > 1e-3) {
-
-        f32 sprite_scale = 0.6;
-        f32 monster_heading = 0.0;
         
         // Determine the sprite to use based on our viewing angle.
-        f32 camera_heading = atan2(camera->dir.y, camera->dir.x); // TODO: inefficient
-        f32 monster_heading_rel = monster_heading + camera_heading + PI + PI/8.0;
-        while (monster_heading_rel < 0) {
-            monster_heading_rel += 2*PI;
-        }
-        while (monster_heading_rel > 2*PI) {
-            monster_heading_rel -= 2*PI;
-        }
+        f32 monster_heading = 0.0;
+        f32 monster_heading_rel = fmod(monster_heading + camera_heading + PI + PI/8.0, 2*PI);
         int monster_frame = (int)(monster_heading_rel * 8.0/(2.0*PI)) & 0x07;
         struct PatchEntry* patch_entry = &CYBR_PATCH_ENTRIES[monster_frame];
 
         // Calculate the column pixel bounds
-        u32 sprite_size_y = patch_entry->patch->size_y;
-        f32 patch_height = ((f32)(sprite_scale * sprite_size_y)) / TEXTURE_SIZE; // TODO: Have to adjust via patch origin
+        int sprite_size_y = patch_entry->patch->size_y;
+        f32 patch_height = DOOM_HEIGHT_PER_PIX * sprite_size_y;
+        f32 patch_z_lo = DOOM_HEIGHT_PER_PIX * (patch_entry->patch->offset_y - sprite_size_y);
+        f32 patch_z_hi = patch_z_lo + patch_height;
         const f32 cam_len = sqrt(1.0 + (sprite_pos_cam_body.y / sprite_pos_cam_body.x)*(sprite_pos_cam_body.y / sprite_pos_cam_body.x));
-        int y_lo = (int)(SCREEN_SIZE_Y/2.0f - cam_len*camera->z/dist_to_player * SCREEN_SIZE_Y / camera->fov.y);
-        int y_hi = (int)(SCREEN_SIZE_Y/2.0f + cam_len*(patch_height - camera->z)/dist_to_player * SCREEN_SIZE_Y / camera->fov.y);
+        int y_lo = (int)(SCREEN_SIZE_Y/2.0f + cam_len*(patch_z_lo - camera->z)/dist_to_player * SCREEN_SIZE_Y / camera->fov.y);
+        int y_hi = (int)(SCREEN_SIZE_Y/2.0f + cam_len*(patch_z_hi - camera->z)/dist_to_player * SCREEN_SIZE_Y / camera->fov.y);
         int y_lo_capped = max(y_lo, 0);
         int y_hi_capped = min(y_hi, SCREEN_SIZE_Y-1);
         u32 denom = max(1, y_hi - y_lo);
         f32 y_step = (f32)(sprite_size_y) / denom;
 
-        u32 sprite_size_x = patch_entry->patch->size_x;  // TODO: Have to adjust via patch origin
-        f32 patch_width = ((f32)(sprite_scale * sprite_size_x)) / TEXTURE_SIZE;
+        int sprite_size_x = patch_entry->patch->size_x;  // TODO: Have to adjust via patch origin
+        f32 patch_width = DOOM_HEIGHT_PER_PIX * sprite_size_x;
+        // f32 patch_x_offset = DOOM_HEIGHT_PER_PIX * (patch_entry->patch->offset_x - sprite_size_x); // Where the center of the sprite is
         int x_column_lo = (int)((0.5 - ((sprite_pos_cam_body.y + patch_width/2) / sprite_pos_cam_body.x)/(camera->fov.x))*SCREEN_SIZE_X);
         int x_column_hi = (int)((0.5 - ((sprite_pos_cam_body.y - patch_width/2) / sprite_pos_cam_body.x)/(camera->fov.x))*SCREEN_SIZE_X);
         f32 x_step = ((f32)(sprite_size_x)/(x_column_hi - x_column_lo + 1));
@@ -574,8 +572,6 @@ void RenderObjects(
                         y_texture_skip = WAD[patch_entry->byte_offset + column_offset];
                         y_pix_in_col = WAD[patch_entry->byte_offset + column_offset + 1];
                     } else if (texture_y > y_texture_skip) {
-                        // TODO: Get pixel.
-                        // u32 color = GetColumnMajorPixelAt(&BITMAP_STICK, texture_x, texture_y);
                         u8 color_index = WAD[patch_entry->byte_offset + column_offset + 3 + texture_y - y_texture_skip];  // Index into the DOOM color palette.
                         u32 color = *(u32*)(WAD + PALETTE_OFFSET + 3*color_index);
                         color |= 0xFF000000; // Set alpha to full.
