@@ -7,6 +7,7 @@
 #include "vec.h"
 #include "input.h"
 #include "bitmap.h"
+#include "delaunay_mesh.h"
 #include "game.h"
 
 #define ASSERT(_e, ...) if (!(_e)) { fprintf(stderr, __VA_ARGS__); exit(1); }
@@ -672,6 +673,15 @@ int main(int argc, char *argv[]) {
     gettimeofday(&timeval_tick, NULL);
     gettimeofday(&timeval_tick_prev, NULL);
 
+    // Init mesh
+    struct DelaunayMesh* geometry_mesh = ConstructEmptyDelaunayMesh(
+                                            1000.0f, // bounding_radius
+                                            0.1f, // min_dist_to_vertex
+                                            0.1f, // min_dist_to_edge,
+                                            128, // max_n_vertices,
+                                            128 // max_n_quarter_edges
+                                        );
+
     // Main loop
     state.quit = 0;
     while (state.quit == 0) {
@@ -862,6 +872,7 @@ int main(int argc, char *argv[]) {
     // Free our assets
     free(ASSETS_BINARY_BLOB);
     free(WAD);
+    DeconstructDelaunayMesh(geometry_mesh);
 
     return 0;
 }

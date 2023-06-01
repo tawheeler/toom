@@ -13,5 +13,6 @@
 #define DOOM_PIX_PER_WALL_WIDTH 40
 
 #define PI 3.1415926535
+#define DEG2RAD 0.01745329251 // pi/180
 
 #endif
