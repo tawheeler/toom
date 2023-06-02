@@ -32,12 +32,12 @@ void Tick(
     }
 
     if (IsPressed(keyboard_state->three)) {
-        state->camera.z *= 0.95;
-        printf("camera z: %.3f\n", state->camera.z);
+        state->player.z *= 0.95;
+        printf("player z: %.3f\n", state->player.z);
     }
     if (IsPressed(keyboard_state->four)) {
-        state->camera.z /= 0.95;
-        printf("camera z: %.3f\n", state->camera.z);
+        state->player.z /= 0.95;
+        printf("player z: %.3f\n", state->player.z);
     }
 
     // Update the player's velocity
@@ -49,34 +49,34 @@ void Tick(
     const f32 kAirFrictionRot = 4.0;
 
     // Note: Speed is in the global frame
-    state->player_speed.x += (state->camera.dir.x*input_dir.x - state->camera.dir.y*input_dir.y) * kPlayerInputAccel * dt;
-    state->player_speed.y += (state->camera.dir.y*input_dir.x + state->camera.dir.x*input_dir.y) * kPlayerInputAccel * dt;
-    state->player_omega += input_rot_dir * kPlayerInputAngularAccel * dt;
+    state->player.vel.x += (state->player.dir.x*input_dir.x - state->player.dir.y*input_dir.y) * kPlayerInputAccel * dt;
+    state->player.vel.y += (state->player.dir.y*input_dir.x + state->player.dir.x*input_dir.y) * kPlayerInputAccel * dt;
+    state->player.omega += input_rot_dir * kPlayerInputAngularAccel * dt;
 
     // Clamp the velocity to a maximum magnitude
-    f32 speed = length(state->player_speed);
+    f32 speed = length(state->player.vel);
     if (speed > kPlayerMaxSpeed) {
-        state->player_speed.x *= kPlayerMaxSpeed / speed;
-        state->player_speed.y *= kPlayerMaxSpeed / speed;
+        state->player.vel.x *= kPlayerMaxSpeed / speed;
+        state->player.vel.y *= kPlayerMaxSpeed / speed;
     }
-    if (state->player_omega > kPlayerMaxOmega) {
-        state->player_omega *= kPlayerMaxOmega / state->player_omega;
-    } else if (state->player_omega < -kPlayerMaxOmega) {
-        state->player_omega *= - kPlayerMaxOmega / state->player_omega;
+    if (state->player.omega > kPlayerMaxOmega) {
+        state->player.omega *= kPlayerMaxOmega / state->player.omega;
+    } else if (state->player.omega < -kPlayerMaxOmega) {
+        state->player.omega *= - kPlayerMaxOmega / state->player.omega;
     }
 
     // Update the player's position
-    state->camera.pos.x += state->player_speed.x * dt;
-    state->camera.pos.y += state->player_speed.y * dt;
+    state->player.pos.x += state->player.vel.x * dt;
+    state->player.pos.y += state->player.vel.y * dt;
 
     // Update the player's rotational heading
-    f32 theta = atan2(state->camera.dir.y, state->camera.dir.x);
-    theta += state->player_omega * dt;
-    state->camera.dir = ((v2) {cos(theta), sin(theta)});
+    f32 theta = atan2(state->player.dir.y, state->player.dir.x);
+    theta += state->player.omega * dt;
+    state->player.dir = ((v2) {cos(theta), sin(theta)});
 
     // Apply air friction
     f32 air_friction_decay = exp(-kAirFriction * dt);
-    state->player_speed.x *= air_friction_decay;
-    state->player_speed.y *= air_friction_decay;
-    state->player_omega *= exp(-kAirFrictionRot * dt);
+    state->player.vel.x *= air_friction_decay;
+    state->player.vel.y *= air_friction_decay;
+    state->player.omega *= exp(-kAirFrictionRot * dt);
 }

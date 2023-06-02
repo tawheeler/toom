@@ -4,19 +4,18 @@
 #include "typedefs.h"
 #include "vec.h"
 #include "input.h"
+#include "delaunay_mesh.h"
 
-struct CameraState {
-    v2 pos; // camera location in game frame
-    v2 dir; // unit direction that the camera is facing
-    v2 fov; // width (x) and height (y) of the field of view at unit distance from the camera
-    f32 z;  // height over the ground [m]
+struct PlayerState {
+    v2 pos;    // location in game coordinate frame
+    v2 dir;    // unit direction that the camera is facing
+    v2 vel;    // linear rate of change
+    f32 omega; // angular rate of change [rad/s]
+    f32 z;    // height over the ground
 };
 
 struct GameState {
-    struct CameraState camera;
-    
-    v2 player_speed;
-    f32 player_omega;    
+    struct PlayerState player;
 };
 
 // Propagate the game state forward by dt seconds.

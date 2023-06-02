@@ -43,6 +43,15 @@ struct Bitmap BITMAP;
 struct Bitmap BITMAP_STICK;
 
 // ------------------------------------------------------------------------------
+
+struct CameraState {
+    v2 fov; // width (x) and height (y) of the field of view at unit distance from the camera
+    v2 pos;
+    v2 dir;
+    f32 z;
+};
+
+// ------------------------------------------------------------------------------
 // DOOM Assets
 
 u8* WAD = NULL;
@@ -97,6 +106,7 @@ struct {
     
     bool quit;
 
+    struct CameraState camera;
     struct GameState game_state;
     struct KeyBoardState keyboard_state;
 } state;
@@ -651,15 +661,15 @@ int main(int argc, char *argv[]) {
     ASSERT(state.texture, "Error creating SDL texture: %s\n", SDL_GetError());
 
     // Init camera
-    state.game_state.camera.pos = (v2) { 5.0f, 5.0f };
-    state.game_state.camera.dir = ((v2) {cos(0.0), sin(0.0)});
-    state.game_state.camera.fov.x = 1.5f;
-    state.game_state.camera.fov.y = state.game_state.camera.fov.x * SCREEN_SIZE_Y / SCREEN_SIZE_X;
-    state.game_state.camera.z = 0.4;
+    state.camera.fov.x = 1.5f;
+    state.camera.fov.y = state.camera.fov.x * SCREEN_SIZE_Y / SCREEN_SIZE_X;
 
     // Init player state
-    state.game_state.player_speed = (v2) { 0.0f, 0.0f };
-    state.game_state.player_omega = 0.0f;
+    state.game_state.player.pos = (v2) { 5.0, 5.0 };
+    state.game_state.player.dir = (v2) { 0.0, 0.0 };
+    state.game_state.player.vel = (v2) { 0.0, 0.0 };
+    state.game_state.player.omega = 0.0f;
+    state.game_state.player.z = 0.4;
 
     // Init keyboard
     ClearKeyboardState(&state.keyboard_state);
@@ -733,7 +743,7 @@ int main(int argc, char *argv[]) {
     }
 
     // Player enclosing triangle
-    QuarterEdge* qe_player_enclosing_triangle = DelaunayMeshGetEnclosingTriangle2(geometry_mesh, &(state.game_state.camera.pos));
+    QuarterEdge* qe_player_enclosing_triangle = DelaunayMeshGetEnclosingTriangle2(geometry_mesh, &(state.game_state.player.pos));
 
     // Main loop
     state.quit = 0;
@@ -806,7 +816,12 @@ int main(int argc, char *argv[]) {
             printf("DONE.\n");
         }
 
-        Render(state.pixels, state.wall_raycast_radius, &state.game_state.camera);
+        // Set camera to player state
+        state.camera.pos = state.game_state.player.pos;
+        state.camera.dir = state.game_state.player.dir;
+        state.camera.z = state.game_state.player.z;
+
+        Render(state.pixels, state.wall_raycast_radius, &state.camera);
         DecayKeyboardState(&state.keyboard_state);
 
         // Get timer end for all the non-SDL stuff
@@ -863,7 +878,7 @@ int main(int argc, char *argv[]) {
 
             { // Render the camera raycasts
                 SDL_SetRenderDrawColor(debug_renderer, 0xF5, 0x61, 0x5C, 0xFF);
-                struct CameraState* camera = &state.game_state.camera;
+                struct CameraState* camera = &state.camera;
                 int camera_x = camera->pos.x / TILE_WIDTH * pix_per_tile + offset_x;
                 int camera_y = debug_window_size_xy - (camera->pos.y / TILE_WIDTH * pix_per_tile + offset_y);
 
@@ -888,7 +903,7 @@ int main(int argc, char *argv[]) {
 
             { // Render the billboard sprite
                 SDL_SetRenderDrawColor(debug_renderer, 0x00, 0x00, 0x00, 0xFF);
-                struct CameraState* camera = &state.game_state.camera;
+                struct CameraState* camera = &state.camera;
 
                 v2 sprite_pos = { 10.0f, 4.5f };
                 f32 sprite_halfwidth = 0.5;
@@ -936,7 +951,7 @@ int main(int argc, char *argv[]) {
 
                 // Update it.
                 // TODO: Keep track of this elsewhere.
-                qe_player_enclosing_triangle = DelaunayMeshGetEnclosingTriangle(geometry_mesh, &(state.game_state.camera.pos), qe_player_enclosing_triangle);
+                qe_player_enclosing_triangle = DelaunayMeshGetEnclosingTriangle(geometry_mesh, &(state.game_state.player.pos), qe_player_enclosing_triangle);
 
                 SDL_SetRenderDrawColor(debug_renderer, 0x48, 0x48, 0xCF, 0xFF);
                 if (geometry_mesh_quarter_edge_is_solid[qe_player_enclosing_triangle->index]) {
