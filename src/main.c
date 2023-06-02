@@ -23,9 +23,9 @@ struct BinaryAssetTableOfContentEntry {
 };
 
 struct Mapdata {
-    u32  n_tiles;
-    u32  n_tiles_x;
-    u32  n_tiles_y;
+    u32 n_tiles;
+    u32 n_tiles_x;
+    u32 n_tiles_y;
     u8* tiles; // Each tile is either solid (0) or has a texture index (>0)
     u8* floor;
     u8* ceiling;
@@ -467,7 +467,7 @@ void RenderWalls(
         };
 
         // Calculate the ray length
-        const f32 ray_len = length( ((v2) {collision.x - camera->pos.x, collision.y - camera->pos.y}) );
+        const f32 ray_len = length( sub(collision, camera->pos) );
         wall_raycast_radius[x] = ray_len;
 
         // Calculate the pixel bounds that we fill the wall in for
@@ -510,9 +510,7 @@ void RenderObjects(
     f32 camera_heading = atan2(camera->dir.y, camera->dir.x); // TODO: inefficient
 
     v2 sprite_pos = { 10.0f, 4.5f };
-    v2 sprite_rel_camera = {
-        sprite_pos.x - camera->pos.x,
-        sprite_pos.y - camera->pos.y};
+    v2 sprite_rel_camera = sub(sprite_pos, camera->pos);
     f32 dist_to_player = length(sprite_rel_camera);
 
     f32 s = camera->dir.y;
@@ -679,8 +677,63 @@ int main(int argc, char *argv[]) {
                                             0.1f, // min_dist_to_vertex
                                             0.1f, // min_dist_to_edge,
                                             128, // max_n_vertices,
-                                            128 // max_n_quarter_edges
+                                            2048 // max_n_quarter_edges
                                         );
+    {
+        for (int y = 0; y < MAPDATA.n_tiles_y; y++) {
+            for (int x = 0; x < MAPDATA.n_tiles_x; x++) {
+                if (MAPDATA.tiles[GetMapDataIndex(&MAPDATA, x, y)] > 0) {
+                    // This tile is solid
+                    
+                    f32 x_lo = TILE_WIDTH * x;
+                    f32 y_lo = TILE_WIDTH * y;
+                    f32 x_hi = x_lo + TILE_WIDTH;
+                    f32 y_hi = y_lo + TILE_WIDTH;
+                    
+                    // Add all 4 vertices to the mesh
+                    v2 bl = {x_lo, y_lo};
+                    v2 br = {x_hi, y_lo};
+                    v2 tr = {x_hi, y_hi};
+                    v2 tl = {x_lo, y_hi};
+                    DelaunayMeshAddVertex(geometry_mesh, &bl);
+                    DelaunayMeshAddVertex(geometry_mesh, &br);
+                    DelaunayMeshAddVertex(geometry_mesh, &tr);
+                    DelaunayMeshAddVertex(geometry_mesh, &tl);
+                }
+            }
+        }
+    }
+
+    // For each quarter edge, store whether it is solid.
+    // Only do this for dual quarter edges.
+    // TODO: Bitvector rather than byte vector.
+    u8* geometry_mesh_quarter_edge_is_solid = (u8*) malloc(geometry_mesh->n_quarter_edges);
+    for (int qe_index = 0; qe_index < geometry_mesh->n_quarter_edges; qe_index ++) {
+        geometry_mesh_quarter_edge_is_solid[qe_index] = 0;
+        QuarterEdge* qe_dual = DelaunayMeshGetQuarterEdge(geometry_mesh, qe_index);
+        if (IsDualEdge(qe_dual)) {
+            // Get the centroid;
+            const v2* a = DelaunayMeshGetTriangleVertex1(geometry_mesh, qe_dual);
+            const v2* b = DelaunayMeshGetTriangleVertex2(geometry_mesh, qe_dual);
+            const v2* c = DelaunayMeshGetTriangleVertex3(geometry_mesh, qe_dual);
+            v2 centroid = {
+                (a->x + b->x + c->x)/3.0,
+                (a->y + b->y + c->y)/3.0
+            };
+
+            // Get the tile this falls into.
+            int tile_x = clamp((int)floorf(centroid.x / TILE_WIDTH), 0, MAPDATA.n_tiles_x);
+            int tile_y = clamp((int)floorf(centroid.y / TILE_WIDTH), 0, MAPDATA.n_tiles_y);
+            
+            // If the tile is solid, mark the quarter edge as solid.
+            if (MAPDATA.tiles[GetMapDataIndex(&MAPDATA, tile_x, tile_y)] > 0) {
+                geometry_mesh_quarter_edge_is_solid[qe_index] = 1;
+            }
+        }
+    }
+
+    // Player enclosing triangle
+    QuarterEdge* qe_player_enclosing_triangle = DelaunayMeshGetEnclosingTriangle2(geometry_mesh, &(state.game_state.camera.pos));
 
     // Main loop
     state.quit = 0;
@@ -808,58 +861,103 @@ int main(int argc, char *argv[]) {
                 }
             }
 
-            // Render the camera raycasts
-            SDL_SetRenderDrawColor(debug_renderer, 0xF5, 0x61, 0x5C, 0xFF);
-            struct CameraState* camera = &state.game_state.camera;
-            int camera_x = camera->pos.x / TILE_WIDTH * pix_per_tile + offset_x;
-            int camera_y = debug_window_size_xy - (camera->pos.y / TILE_WIDTH * pix_per_tile + offset_y);
+            { // Render the camera raycasts
+                SDL_SetRenderDrawColor(debug_renderer, 0xF5, 0x61, 0x5C, 0xFF);
+                struct CameraState* camera = &state.game_state.camera;
+                int camera_x = camera->pos.x / TILE_WIDTH * pix_per_tile + offset_x;
+                int camera_y = debug_window_size_xy - (camera->pos.y / TILE_WIDTH * pix_per_tile + offset_y);
 
-            for (int x = 0; x < SCREEN_SIZE_X; x++) {
-                f32 r = state.wall_raycast_radius[x];
-                
-                const f32 dw = camera->fov.x/2 - (camera->fov.x*x)/SCREEN_SIZE_X;
-                const v2 cp = {
-                    camera->dir.x - dw*camera->dir.y,
-                    camera->dir.y + dw*camera->dir.x
-                };
-                const f32 cam_len = length( (cp) );
-                const v2 dir = {cp.x / cam_len, cp.y / cam_len};
+                for (int x = 0; x < SCREEN_SIZE_X; x++) {
+                    f32 r = state.wall_raycast_radius[x];
+                    
+                    const f32 dw = camera->fov.x/2 - (camera->fov.x*x)/SCREEN_SIZE_X;
+                    const v2 cp = {
+                        camera->dir.x - dw*camera->dir.y,
+                        camera->dir.y + dw*camera->dir.x
+                    };
+                    const f32 cam_len = length( (cp) );
+                    const v2 dir = {cp.x / cam_len, cp.y / cam_len};
 
-                f32 camera_x1 = camera->pos.x + r * dir.x;
-                f32 camera_y1 = camera->pos.y + r * dir.y;
-                int camera_x2 = camera_x1 / TILE_WIDTH * pix_per_tile + offset_x;
-                int camera_y2 = debug_window_size_xy - (camera_y1 / TILE_WIDTH * pix_per_tile + offset_y);
-                SDL_RenderDrawLine(debug_renderer, camera_x, camera_y, camera_x2, camera_y2);
+                    f32 camera_x1 = camera->pos.x + r * dir.x;
+                    f32 camera_y1 = camera->pos.y + r * dir.y;
+                    int camera_x2 = camera_x1 / TILE_WIDTH * pix_per_tile + offset_x;
+                    int camera_y2 = debug_window_size_xy - (camera_y1 / TILE_WIDTH * pix_per_tile + offset_y);
+                    SDL_RenderDrawLine(debug_renderer, camera_x, camera_y, camera_x2, camera_y2);
+                }
             }
 
-            // Render the monster
-            SDL_SetRenderDrawColor(debug_renderer, 0x00, 0x00, 0x00, 0xFF);
-            v2 sprite_pos = { 10.0f, 4.5f };
-            f32 sprite_halfwidth = 0.5;
+            { // Render the billboard sprite
+                SDL_SetRenderDrawColor(debug_renderer, 0x00, 0x00, 0x00, 0xFF);
+                struct CameraState* camera = &state.game_state.camera;
 
-            // f32 sprite_heading = 0.0;
-            // const v2 sprite_tangent = {
-            //     sin(sprite_heading),
-            //     cos(sprite_heading)
-            // };
-            const v2 sprite_tangent = {
-                 camera->dir.y,
-                -camera->dir.x
-            };
+                v2 sprite_pos = { 10.0f, 4.5f };
+                f32 sprite_halfwidth = 0.5;
+                const v2 sprite_tangent = rotr(camera->dir);
 
-            const v2 a = {
-                sprite_pos.x + sprite_halfwidth*sprite_tangent.x,
-                sprite_pos.y + sprite_halfwidth*sprite_tangent.y
-            };
-            const v2 b = {
-                sprite_pos.x - sprite_halfwidth*sprite_tangent.x,
-                sprite_pos.y - sprite_halfwidth*sprite_tangent.y
-            };
-            int ax = a.x / TILE_WIDTH * pix_per_tile + offset_x;
-            int ay = debug_window_size_xy - (a.y / TILE_WIDTH * pix_per_tile + offset_y);
-            int bx = b.x / TILE_WIDTH * pix_per_tile + offset_x;
-            int by = debug_window_size_xy - (b.y / TILE_WIDTH * pix_per_tile + offset_y);
-            SDL_RenderDrawLine(debug_renderer, ax, ay, bx, by);
+                const v2 a = {
+                    sprite_pos.x + sprite_halfwidth*sprite_tangent.x,
+                    sprite_pos.y + sprite_halfwidth*sprite_tangent.y
+                };
+                const v2 b = {
+                    sprite_pos.x - sprite_halfwidth*sprite_tangent.x,
+                    sprite_pos.y - sprite_halfwidth*sprite_tangent.y
+                };
+                int ax = a.x / TILE_WIDTH * pix_per_tile + offset_x;
+                int ay = debug_window_size_xy - (a.y / TILE_WIDTH * pix_per_tile + offset_y);
+                int bx = b.x / TILE_WIDTH * pix_per_tile + offset_x;
+                int by = debug_window_size_xy - (b.y / TILE_WIDTH * pix_per_tile + offset_y);
+                SDL_RenderDrawLine(debug_renderer, ax, ay, bx, by);
+            }
+
+            { // Render the mesh 
+                SDL_SetRenderDrawColor(debug_renderer, 0xFF, 0x48, 0xCF, 0xFF);
+               
+                for (int qe_index = 0; qe_index < DelaunayMeshNumQuarterEdges(geometry_mesh); qe_index++) {
+                    QuarterEdge* qe = DelaunayMeshGetQuarterEdge(geometry_mesh, qe_index);
+                    
+                    if (IsPrimalEdge(qe) && !DelaunayMeshIsBoundaryVertex(geometry_mesh, qe->vertex)) {
+                        // Get its opposite side.
+                        QuarterEdge* qe_sym = QESym(qe);
+                        
+                        const v2* a = qe->vertex;
+                        const v2* b = qe_sym->vertex;
+                        if (a > b && !DelaunayMeshIsBoundaryVertex(geometry_mesh, b)) { // Avoid rendering edges twice
+                            int ax = a->x / TILE_WIDTH * pix_per_tile + offset_x;
+                            int ay = debug_window_size_xy - (a->y / TILE_WIDTH * pix_per_tile + offset_y);
+                            int bx = b->x / TILE_WIDTH * pix_per_tile + offset_x;
+                            int by = debug_window_size_xy - (b->y / TILE_WIDTH * pix_per_tile + offset_y);
+                            SDL_RenderDrawLine(debug_renderer, ax, ay, bx, by);
+                        }
+                    }     
+                }
+            } 
+
+            { // Render the player-enclosing triangle 
+
+                // Update it.
+                // TODO: Keep track of this elsewhere.
+                qe_player_enclosing_triangle = DelaunayMeshGetEnclosingTriangle(geometry_mesh, &(state.game_state.camera.pos), qe_player_enclosing_triangle);
+
+                SDL_SetRenderDrawColor(debug_renderer, 0x48, 0x48, 0xCF, 0xFF);
+                if (geometry_mesh_quarter_edge_is_solid[qe_player_enclosing_triangle->index]) {
+                    SDL_SetRenderDrawColor(debug_renderer, 0xFF, 0x00, 0x00, 0xFF);
+                }
+               
+                // The quarter edge is a dual edge, and its containing triangle is solid.
+                const v2* a = DelaunayMeshGetTriangleVertex1(geometry_mesh, qe_player_enclosing_triangle);
+                const v2* b = DelaunayMeshGetTriangleVertex2(geometry_mesh, qe_player_enclosing_triangle);
+                const v2* c = DelaunayMeshGetTriangleVertex3(geometry_mesh, qe_player_enclosing_triangle);
+
+                int ax = a->x / TILE_WIDTH * pix_per_tile + offset_x;
+                int ay = debug_window_size_xy - (a->y / TILE_WIDTH * pix_per_tile + offset_y);
+                int bx = b->x / TILE_WIDTH * pix_per_tile + offset_x;
+                int by = debug_window_size_xy - (b->y / TILE_WIDTH * pix_per_tile + offset_y);
+                int cx = c->x / TILE_WIDTH * pix_per_tile + offset_x;
+                int cy = debug_window_size_xy - (c->y / TILE_WIDTH * pix_per_tile + offset_y);
+                SDL_RenderDrawLine(debug_renderer, ax, ay, bx, by);
+                SDL_RenderDrawLine(debug_renderer, bx, by, cx, cy);
+                SDL_RenderDrawLine(debug_renderer, cx, cy, ax, ay);
+            }
         }
         
 
@@ -873,6 +971,7 @@ int main(int argc, char *argv[]) {
     free(ASSETS_BINARY_BLOB);
     free(WAD);
     DeconstructDelaunayMesh(geometry_mesh);
+    free(geometry_mesh_quarter_edge_is_solid);
 
     return 0;
 }

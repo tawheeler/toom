@@ -6,32 +6,33 @@
 
 #define INVALID_MESH_INDEX -1
 
-// A quarter edge represents a directed edge in a QuadEdgeTree.
+// A quarter edge represents a directed edge in a QuadEdgeTree.camera->
 // Each undirected edge in the graph A <-> B with face L on the left of A->B and face R on the right
 // of A->B has four quarter edges:
 //    A->B, L->R, B->A, and R->L.
 // If this quarter edge is primal, then the vertex index points to its vertex.
 // If this quarter edge is dual (i.e., represents a face), then its is set to typemax(size_t).
-struct QuarterEdge {
+typedef struct QuarterEdge_s {
+    int index;
     v2* vertex;        // Non-null if this is a quarter edge originating at a vertex
-    struct QuarterEdge* next; // The next right-hand (CCW) QuarterEdge with the same origin
-    struct QuarterEdge* rot;  // The next right-hand (CCW) QuarterEdge associated with the same
+    struct QuarterEdge_s* next; // The next right-hand (CCW) QuarterEdge with the same origin
+    struct QuarterEdge_s* rot;  // The next right-hand (CCW) QuarterEdge associated with the same
                        // undirected original edge.
-};
+} QuarterEdge;
 
 // A dual edge connects two faces.
-bool IsDualEdge(const struct QuarterEdge* qe);
+bool IsDualEdge(const QuarterEdge* qe);
 
 // A primal edge connects two vertices.
-bool IsPrimalEdge(const struct QuarterEdge* qe);
+bool IsPrimalEdge(const QuarterEdge* qe);
 
 // QuarterEdge traversal.
-struct QuarterEdge* QENext(const struct QuarterEdge* qe);
-struct QuarterEdge* QERot(const struct QuarterEdge* qe);
-struct QuarterEdge* QESym(const struct QuarterEdge* qe);
-struct QuarterEdge* QETor(const struct QuarterEdge* qe);
-struct QuarterEdge* QEPrev(const struct QuarterEdge* qe);
-struct QuarterEdge* QELnext(const struct QuarterEdge* qe);
+QuarterEdge* QENext(const QuarterEdge* qe);
+QuarterEdge* QERot(const QuarterEdge* qe);
+QuarterEdge* QESym(const QuarterEdge* qe);
+QuarterEdge* QETor(const QuarterEdge* qe);
+QuarterEdge* QEPrev(const QuarterEdge* qe);
+QuarterEdge* QELnext(const QuarterEdge* qe);
 
 // A DelaunayMesh is a Quad Edge Mesh that can dynamically generate a Delaunay (or constrained
 // Delaunay) triangulation. A Quad Edge Mesh's name comes from the fact that each edge in a "normal"
@@ -43,11 +44,11 @@ struct QuarterEdge* QELnext(const struct QuarterEdge* qe);
 // length as memory reallocates. We use integers to index into our vertices and quarter edges to
 // avoid memeory reallocation issues.
 struct DelaunayMesh {
-    // The maximum radius that a point can be from the origin
-    f32 bounding_radius;
+    // The square of the maximum radius that a point can be from the origin
+    f32 square_bounding_radius;
 
     // Points within this distance are considered colinear
-    f32 min_dist_to_vertex;
+    f32 square_min_dist_to_vertex;
 
     // A point this close to an edge is considered coincident
     f32 min_dist_to_edge;
@@ -62,7 +63,7 @@ struct DelaunayMesh {
     // This class owns this memory.
     u32 n_quarter_edges;
     u32 max_n_quarter_edges;
-    struct QuarterEdge* quarter_edges;
+    QuarterEdge* quarter_edges;
 };
 
 // Allocate a DelaunayMesh and initialize it to be a bounding triangle with
@@ -82,28 +83,37 @@ size_t DelaunayMeshNumQuarterEdges(struct DelaunayMesh* mesh);
 size_t DelaunayMeshNumEdges(struct DelaunayMesh* mesh);
 
 const v2* DelaunayMeshGetVertex(struct DelaunayMesh* mesh, int i);
-struct QuarterEdge* DelaunayMeshGetQuarterEdge(struct DelaunayMesh* mesh, int i);
+QuarterEdge* DelaunayMeshGetQuarterEdge(struct DelaunayMesh* mesh, int i);
+
+// Whether the given vertex is one of the boundary vertices (The first three in vertices_).
+bool DelaunayMeshIsBoundaryVertex(const struct DelaunayMesh* mesh, const v2* v);
 
 // Get the quarter edge pointing from i to j, if it exists.
 // Note that the current implementation loops over all quarter edges.
-struct QuarterEdge* DelaunayMeshGetQuarterEdgeBetween(struct DelaunayMesh* mesh, int i, int j);
+QuarterEdge* DelaunayMeshGetQuarterEdgeBetween(struct DelaunayMesh* mesh, int i, int j);
 
 // Returns true if an edge from i to j exists.
 // Note that the current implementation loops over all quarter edges.
 bool DelaunayMeshHasEdge(struct DelaunayMesh* mesh, int i, int j);
 
-// Add a new vertex to the mesh, returning the index of the newly added vertex.
-// Returns NULL if we are at capacity.
-v2* _DelaunayMeshAddVertex(struct DelaunayMesh* mesh, f32 x, f32 y);
+// Insert a new vertex into the mesh and it to continue to be a Delaunay triangularization. 
+// Returns the index of the added vertex if a new point was added, and kInvalidIndex instead.
+// (If the new point is coincident with an existing point or the boundary edge, no new point is added.)
+int DelaunayMeshAddVertex(struct DelaunayMesh* mesh, const v2* p);
 
-// Add a new edge between the vertices at index a and b.
-// Create the quarter edges associated with the given undirected edge.
-// We always create quarter-edges in groups of four.
-// Returns a reference to the quarter-edge from A to B.
-// Returns NULL if we are at capacity.
-struct QuarterEdge* _DelaunayMeshAddEdge(struct DelaunayMesh* mesh, v2* a, v2* b);
+// Enforce an edge between the ith and jth vertices.
+// Returns true if this operation was successful.
+bool DelaunayMeshConstrainEdge(struct DelaunayMesh* mesh, int i, int j);
 
-// A utility function used to join quarter edges.
-void _DelaunayMeshSplice(struct DelaunayMesh* mesh, struct QuarterEdge* a, struct QuarterEdge* b);
+// Find the triangle in our mesh that encloses the given point.
+// The search starts from the given dual quarter edge.
+// Return a dual quarter edge originating from the triangle face.
+QuarterEdge* DelaunayMeshGetEnclosingTriangle(struct DelaunayMesh* mesh, const v2* p, QuarterEdge* qe_dual);
+QuarterEdge* DelaunayMeshGetEnclosingTriangle2(struct DelaunayMesh* mesh, const v2* p);
+
+// Given a dual quarter edge, return the first vertex on that face.
+const v2* DelaunayMeshGetTriangleVertex1(struct DelaunayMesh* mesh, const QuarterEdge* qe_dual);
+const v2* DelaunayMeshGetTriangleVertex2(struct DelaunayMesh* mesh, const QuarterEdge* qe_dual);
+const v2* DelaunayMeshGetTriangleVertex3(struct DelaunayMesh* mesh, const QuarterEdge* qe_dual);
 
 #endif

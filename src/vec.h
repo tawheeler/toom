@@ -12,6 +12,7 @@ typedef struct v2_s {
 
 #define dot(v0, v1) \
     ({ const v2 _v0 = (v0), _v1 = (v1); (_v0.x * _v1.x) + (_v0.y * _v1.y); })
+#define sqnorm(v) ({ const v2 _v = (v); dot(_v, _v); })
 #define length(v) ({ const v2 _v = (v); sqrtf(dot(_v, _v)); })
 #define normalize(u) ({           \
         const v2 _u = (u);        \
@@ -22,5 +23,8 @@ typedef struct v2_s {
 #define min(a, b) ({ __typeof__(a) _a = (a), _b = (b); _a < _b ? _a : _b; })
 #define max(a, b) ({ __typeof__(a) _a = (a), _b = (b); _a > _b ? _a : _b; })
 #define clamp(v, lo, hi) ({ __typeof__(v) _v = (v), _lo = (lo), _hi = (hi); _v > _hi ? _hi : (_v < _lo ? _lo : _v); })
+
+v2 add(v2 a, v2 b);
+v2 sub(v2 a, v2 b);
 
 #endif
