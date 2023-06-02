@@ -12,9 +12,15 @@ struct PlayerState {
     v2 vel;    // linear rate of change
     f32 omega; // angular rate of change [rad/s]
     f32 z;    // height over the ground
+
+    // A pointer to the (dual) quarter edge in the geometry mesh containing the player
+    QuarterEdge* qe_geometry;
 };
 
 struct GameState {
+    struct DelaunayMesh* geometry_mesh;
+    u8* geometry_mesh_quarter_edge_is_solid;
+    
     struct PlayerState player;
 };
 

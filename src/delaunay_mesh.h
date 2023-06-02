@@ -6,6 +6,12 @@
 
 #define INVALID_MESH_INDEX -1
 
+// Determine whether the given points are in right-hand order (CCW).
+// Returns a value > 0 if right-hand (CCW).
+// Returns a value < 0 if left-hand (CW).
+// Returns zero if the points are colinear.
+f32 GetRightHandedness(const v2* a, const v2* b, const v2* c);
+
 // A quarter edge represents a directed edge in a QuadEdgeTree.camera->
 // Each undirected edge in the graph A <-> B with face L on the left of A->B and face R on the right
 // of A->B has four quarter edges:

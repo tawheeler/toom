@@ -37,10 +37,6 @@ f32 Det4x4(f32 a, f32 b, f32 c, f32 d,
 }
 
 // ------------------------------------------------------------------------------------------------
-// Determine whether the given points are in right-hand order (CCW).
-// Returns a value > 0 if right-hand (CCW).
-// Returns a value < 0 if left-hand (CW).
-// Returns zero if the points are colinear.
 f32 GetRightHandedness(const v2* a, const v2* b, const v2* c) {
     // return Det3x3(a->x, a->y, 1.0f, b->x, b->y, 1.0f, c->x, c->y, 1.0f);
     // return a->x * Det(b->y, 1.0f, c->y, 1.0f) - a->y * Det(b->x, 1.0f, c->x, 1.0f) + 1.0f * Det(b->x, b->y, c->x, c->y);

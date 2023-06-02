@@ -477,7 +477,7 @@ void RenderWalls(
         };
 
         // Calculate the ray length
-        const f32 ray_len = length( sub(collision, camera->pos) );
+        const f32 ray_len = max(length( sub(collision, camera->pos) ), 0.01); // TODO: Remove this `max` once we have proper collision
         wall_raycast_radius[x] = ray_len;
 
         // Calculate the pixel bounds that we fill the wall in for
@@ -664,25 +664,8 @@ int main(int argc, char *argv[]) {
     state.camera.fov.x = 1.5f;
     state.camera.fov.y = state.camera.fov.x * SCREEN_SIZE_Y / SCREEN_SIZE_X;
 
-    // Init player state
-    state.game_state.player.pos = (v2) { 5.0, 5.0 };
-    state.game_state.player.dir = (v2) { 0.0, 0.0 };
-    state.game_state.player.vel = (v2) { 0.0, 0.0 };
-    state.game_state.player.omega = 0.0f;
-    state.game_state.player.z = 0.4;
-
-    // Init keyboard
-    ClearKeyboardState(&state.keyboard_state);
-
-    // Time structs
-    struct timeval timeval_frame_start, timeval_frame_end, timeval_tick, timeval_tick_prev;
-    gettimeofday(&timeval_frame_start, NULL);
-    gettimeofday(&timeval_frame_end, NULL);
-    gettimeofday(&timeval_tick, NULL);
-    gettimeofday(&timeval_tick_prev, NULL);
-
-    // Init mesh
-    struct DelaunayMesh* geometry_mesh = ConstructEmptyDelaunayMesh(
+    // Init geometry mesh
+    state.game_state.geometry_mesh = ConstructEmptyDelaunayMesh(
                                             1000.0f, // bounding_radius
                                             0.1f, // min_dist_to_vertex
                                             0.1f, // min_dist_to_edge,
@@ -705,10 +688,10 @@ int main(int argc, char *argv[]) {
                     v2 br = {x_hi, y_lo};
                     v2 tr = {x_hi, y_hi};
                     v2 tl = {x_lo, y_hi};
-                    DelaunayMeshAddVertex(geometry_mesh, &bl);
-                    DelaunayMeshAddVertex(geometry_mesh, &br);
-                    DelaunayMeshAddVertex(geometry_mesh, &tr);
-                    DelaunayMeshAddVertex(geometry_mesh, &tl);
+                    DelaunayMeshAddVertex(state.game_state.geometry_mesh, &bl);
+                    DelaunayMeshAddVertex(state.game_state.geometry_mesh, &br);
+                    DelaunayMeshAddVertex(state.game_state.geometry_mesh, &tr);
+                    DelaunayMeshAddVertex(state.game_state.geometry_mesh, &tl);
                 }
             }
         }
@@ -717,15 +700,15 @@ int main(int argc, char *argv[]) {
     // For each quarter edge, store whether it is solid.
     // Only do this for dual quarter edges.
     // TODO: Bitvector rather than byte vector.
-    u8* geometry_mesh_quarter_edge_is_solid = (u8*) malloc(geometry_mesh->n_quarter_edges);
-    for (int qe_index = 0; qe_index < geometry_mesh->n_quarter_edges; qe_index ++) {
-        geometry_mesh_quarter_edge_is_solid[qe_index] = 0;
-        QuarterEdge* qe_dual = DelaunayMeshGetQuarterEdge(geometry_mesh, qe_index);
+    state.game_state.geometry_mesh_quarter_edge_is_solid = (u8*) malloc(DelaunayMeshNumQuarterEdges(state.game_state.geometry_mesh));
+    for (int qe_index = 0; qe_index < DelaunayMeshNumQuarterEdges(state.game_state.geometry_mesh); qe_index ++) {
+        state.game_state.geometry_mesh_quarter_edge_is_solid[qe_index] = 0;
+        QuarterEdge* qe_dual = DelaunayMeshGetQuarterEdge(state.game_state.geometry_mesh, qe_index);
         if (IsDualEdge(qe_dual)) {
             // Get the centroid;
-            const v2* a = DelaunayMeshGetTriangleVertex1(geometry_mesh, qe_dual);
-            const v2* b = DelaunayMeshGetTriangleVertex2(geometry_mesh, qe_dual);
-            const v2* c = DelaunayMeshGetTriangleVertex3(geometry_mesh, qe_dual);
+            const v2* a = DelaunayMeshGetTriangleVertex1(state.game_state.geometry_mesh, qe_dual);
+            const v2* b = DelaunayMeshGetTriangleVertex2(state.game_state.geometry_mesh, qe_dual);
+            const v2* c = DelaunayMeshGetTriangleVertex3(state.game_state.geometry_mesh, qe_dual);
             v2 centroid = {
                 (a->x + b->x + c->x)/3.0,
                 (a->y + b->y + c->y)/3.0
@@ -737,13 +720,28 @@ int main(int argc, char *argv[]) {
             
             // If the tile is solid, mark the quarter edge as solid.
             if (MAPDATA.tiles[GetMapDataIndex(&MAPDATA, tile_x, tile_y)] > 0) {
-                geometry_mesh_quarter_edge_is_solid[qe_index] = 1;
+                state.game_state.geometry_mesh_quarter_edge_is_solid[qe_index] = 1;
             }
         }
     }
 
-    // Player enclosing triangle
-    QuarterEdge* qe_player_enclosing_triangle = DelaunayMeshGetEnclosingTriangle2(geometry_mesh, &(state.game_state.player.pos));
+    // Init player state
+    state.game_state.player.pos = (v2) { 5.0, 5.0 };
+    state.game_state.player.dir = (v2) { 0.0, 0.0 };
+    state.game_state.player.vel = (v2) { 0.0, 0.0 };
+    state.game_state.player.omega = 0.0f;
+    state.game_state.player.z = 0.4;
+    state.game_state.player.qe_geometry = DelaunayMeshGetEnclosingTriangle2(state.game_state.geometry_mesh, &(state.game_state.player.pos));
+
+    // Init keyboard
+    ClearKeyboardState(&state.keyboard_state);
+
+    // Time structs
+    struct timeval timeval_frame_start, timeval_frame_end, timeval_tick, timeval_tick_prev;
+    gettimeofday(&timeval_frame_start, NULL);
+    gettimeofday(&timeval_frame_end, NULL);
+    gettimeofday(&timeval_tick, NULL);
+    gettimeofday(&timeval_tick_prev, NULL);
 
     // Main loop
     state.quit = 0;
@@ -809,7 +807,7 @@ int main(int argc, char *argv[]) {
         Tick(&state.game_state, dt, &state.keyboard_state);
         timeval_tick_prev = timeval_tick;
 
-        // Check for a kayboard press to reload our assets
+        // Check for a keyboard press to reload our assets
         if (IsNewlyPressed(state.keyboard_state.r)) {
             printf("Reloading assets.\n");
             LoadAssets();
@@ -927,16 +925,16 @@ int main(int argc, char *argv[]) {
             { // Render the mesh 
                 SDL_SetRenderDrawColor(debug_renderer, 0xFF, 0x48, 0xCF, 0xFF);
                
-                for (int qe_index = 0; qe_index < DelaunayMeshNumQuarterEdges(geometry_mesh); qe_index++) {
-                    QuarterEdge* qe = DelaunayMeshGetQuarterEdge(geometry_mesh, qe_index);
+                for (int qe_index = 0; qe_index < DelaunayMeshNumQuarterEdges(state.game_state.geometry_mesh); qe_index++) {
+                    QuarterEdge* qe = DelaunayMeshGetQuarterEdge(state.game_state.geometry_mesh, qe_index);
                     
-                    if (IsPrimalEdge(qe) && !DelaunayMeshIsBoundaryVertex(geometry_mesh, qe->vertex)) {
+                    if (IsPrimalEdge(qe) && !DelaunayMeshIsBoundaryVertex(state.game_state.geometry_mesh, qe->vertex)) {
                         // Get its opposite side.
                         QuarterEdge* qe_sym = QESym(qe);
                         
                         const v2* a = qe->vertex;
                         const v2* b = qe_sym->vertex;
-                        if (a > b && !DelaunayMeshIsBoundaryVertex(geometry_mesh, b)) { // Avoid rendering edges twice
+                        if (a > b && !DelaunayMeshIsBoundaryVertex(state.game_state.geometry_mesh, b)) { // Avoid rendering edges twice
                             int ax = a->x / TILE_WIDTH * pix_per_tile + offset_x;
                             int ay = debug_window_size_xy - (a->y / TILE_WIDTH * pix_per_tile + offset_y);
                             int bx = b->x / TILE_WIDTH * pix_per_tile + offset_x;
@@ -948,20 +946,15 @@ int main(int argc, char *argv[]) {
             } 
 
             { // Render the player-enclosing triangle 
-
-                // Update it.
-                // TODO: Keep track of this elsewhere.
-                qe_player_enclosing_triangle = DelaunayMeshGetEnclosingTriangle(geometry_mesh, &(state.game_state.player.pos), qe_player_enclosing_triangle);
-
                 SDL_SetRenderDrawColor(debug_renderer, 0x48, 0x48, 0xCF, 0xFF);
-                if (geometry_mesh_quarter_edge_is_solid[qe_player_enclosing_triangle->index]) {
+                if (state.game_state.geometry_mesh_quarter_edge_is_solid[state.game_state.player.qe_geometry->index]) {
                     SDL_SetRenderDrawColor(debug_renderer, 0xFF, 0x00, 0x00, 0xFF);
                 }
                
                 // The quarter edge is a dual edge, and its containing triangle is solid.
-                const v2* a = DelaunayMeshGetTriangleVertex1(geometry_mesh, qe_player_enclosing_triangle);
-                const v2* b = DelaunayMeshGetTriangleVertex2(geometry_mesh, qe_player_enclosing_triangle);
-                const v2* c = DelaunayMeshGetTriangleVertex3(geometry_mesh, qe_player_enclosing_triangle);
+                const v2* a = DelaunayMeshGetTriangleVertex1(state.game_state.geometry_mesh, state.game_state.player.qe_geometry);
+                const v2* b = DelaunayMeshGetTriangleVertex2(state.game_state.geometry_mesh, state.game_state.player.qe_geometry);
+                const v2* c = DelaunayMeshGetTriangleVertex3(state.game_state.geometry_mesh, state.game_state.player.qe_geometry);
 
                 int ax = a->x / TILE_WIDTH * pix_per_tile + offset_x;
                 int ay = debug_window_size_xy - (a->y / TILE_WIDTH * pix_per_tile + offset_y);
@@ -985,8 +978,8 @@ int main(int argc, char *argv[]) {
     // Free our assets
     free(ASSETS_BINARY_BLOB);
     free(WAD);
-    DeconstructDelaunayMesh(geometry_mesh);
-    free(geometry_mesh_quarter_edge_is_solid);
+    DeconstructDelaunayMesh(state.game_state.geometry_mesh);
+    free(state.game_state.geometry_mesh_quarter_edge_is_solid);
 
     return 0;
 }
