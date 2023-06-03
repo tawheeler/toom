@@ -473,8 +473,11 @@ int DelaunayMeshAddVertex(struct DelaunayMesh* mesh, const v2* p) {
 
             // We flipped the edge, so qe_outer_edge has to be traversed again.
             // Back it up.
-            // qe = QEPrev(qe) // TODO: I thought that this works, but apparently it does not.
-            qe = qe_start; // TODO: Figure out a more efficient way of solving this than backing up all the way.
+            qe = QEPrev(qe);
+            if (qe != qe_start) {
+                qe = QEPrev(qe);
+            }
+
             done = 0;
         }
     }
