@@ -510,6 +510,142 @@ void RenderWalls(
     }
 }
 
+void RenderWallsViaMesh(
+    u32* pixels,
+    f32* wall_raycast_radius,
+    struct CameraState* camera,
+    u8* geometry_mesh_quarter_edge_is_solid,
+    QuarterEdge* qe_camera // dual quarter edge representing the face that the camera is in.
+) {
+    for (int x = 0; x < SCREEN_SIZE_X/2; x++) {
+        
+        // Camera to pixel column
+        const f32 dw = camera->fov.x/2 - (camera->fov.x*x)/SCREEN_SIZE_X; // TODO: Precompute once.
+        const v2 cp = {
+            camera->dir.x - dw*camera->dir.y,
+            camera->dir.y + dw*camera->dir.x
+        };
+
+        // Distance from the camera to the column
+        const f32 cam_len = length( (cp) );
+        
+        // Ray direction through this column
+        const v2 dir = {cp.x / cam_len, cp.y / cam_len};
+
+        // Start at the camera pos
+        QuarterEdge* qe_dual = qe_camera;
+        v2 pos = camera->pos;
+
+        // The edge vector of the face that we last crossed.
+        v2 v_face = {0.0, 0.0};
+
+        // Step through triangles until we hit a solid triangle
+        int n_steps = 0;
+        while (n_steps < 100) {
+            n_steps += 1;
+
+            // Grab the enclosing triangle.
+            QuarterEdge* qe_ab = qe_dual->rot;
+            QuarterEdge* qe_bc = qe_dual->next->rot;
+            QuarterEdge* qe_ca = qe_dual->next->next->rot;
+
+            const v2 a = *(qe_ab->vertex);
+            const v2 b = *(qe_bc->vertex);
+            const v2 c = *(qe_ca->vertex);
+
+            // Project our ray out far enough that it would exit our mesh
+            f32 projection_distance = 100.0; // Ridiculously large
+            v2 pos_next_delta = {
+                projection_distance * dir.x,
+                projection_distance * dir.y
+            };
+            v2 pos_next = add(pos, pos_next_delta);
+
+            f32 min_interp = INFINITY;
+            QuarterEdge* qe_dual_next = NULL;
+            
+            // See if we cross any of the 3 faces for the triangle we are in,
+            // And cross the first segment.
+            if (GetRightHandedness(&a, &b, &pos_next) < -1e-4) {
+                // We would cross AB
+                v2 v = sub(b, a);
+                v2 w = sub(pos, a);
+                float interp_ab = cross(v, w) / cross(pos_next_delta, v);
+                if (interp_ab < min_interp) {
+                    min_interp = interp_ab;
+                    qe_dual_next = qe_ab->rot;
+                    v_face = v;
+                }
+            }
+            if (GetRightHandedness(&b, &c, &pos_next) < -1e-4) {
+                // We would cross BC
+                v2 v = sub(c, b);
+                v2 w = sub(pos, b);
+                float interp_bc = cross(v, w) / cross(pos_next_delta, v);
+                if (interp_bc < min_interp) {
+                    min_interp = interp_bc;
+                    qe_dual_next = qe_bc->rot;
+                    v_face = v;
+                }
+            }
+            if (GetRightHandedness(&c, &a, &pos_next) < -1e-4) {
+                // We would cross CA
+                v2 v = sub(a, c);
+                v2 w = sub(pos, c);
+                float interp_ca = cross(v, w) / cross(pos_next_delta, v);
+                if (interp_ca < min_interp) {
+                    min_interp = interp_ca;
+                    qe_dual_next = qe_ca->rot;
+                    v_face = v;
+                }
+            }
+
+            // Move to the face.
+            if (qe_dual_next != NULL) {
+                // Should always be non-null.
+                pos.x += min_interp * pos_next_delta.x;
+                pos.y += min_interp * pos_next_delta.y;
+                qe_dual = qe_dual_next;
+                if (geometry_mesh_quarter_edge_is_solid[qe_dual_next->index] > 0) {
+                    // The new triangle is solid.
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        // Calculate the ray length
+        const f32 ray_len = max(length( sub(pos, camera->pos) ), 0.01); // TODO: Remove this `max` once we have proper collision
+        wall_raycast_radius[x] = ray_len;
+
+        // Calculate the pixel bounds that we fill the wall in for
+        int y_lo = (int)(SCREEN_SIZE_Y/2.0f - cam_len*camera->z/ray_len * SCREEN_SIZE_Y / camera->fov.y);
+        int y_hi = (int)(SCREEN_SIZE_Y/2.0f + cam_len*(WALL_HEIGHT - camera->z)/ray_len * SCREEN_SIZE_Y / camera->fov.y);
+        int y_lo_capped = max(y_lo, 0);
+        int y_hi_capped = min(y_hi, SCREEN_SIZE_Y-1);
+
+        // Texture x offset determines whether we draw the light or dark version
+        u32 texture_x_offset = 0; // TODO: Figure out light/dark side.
+        u32 texture_y_offset = 0; // TODO: Figure out face lookup from quarter edge.
+
+        // Calculate where along the segment we intersected.
+        f32 rem = length(sub(pos, *(qe_dual->rot->rot->rot->vertex))) / length(v_face);
+
+        u32 texture_x = min((int) (TEXTURE_SIZE * rem / TILE_WIDTH), TEXTURE_SIZE-1);
+        u32 baseline = GetColumnMajorPixelIndex(&BITMAP, texture_x+texture_x_offset, texture_y_offset);
+        u32 denom = max(1, y_hi - y_lo);
+        f32 y_loc = (f32)((y_hi - y_hi_capped) * TEXTURE_SIZE) / denom;
+        f32 y_step = (f32)(TEXTURE_SIZE) / denom;
+        for (int y = y_hi_capped; y >= y_lo_capped; y--) {
+            u32 texture_y = min((u32) (y_loc), TEXTURE_SIZE-1);
+            u32 color = BITMAP.abgr[texture_y+baseline];
+            pixels[(y * SCREEN_SIZE_X) + x] = color;
+            y_loc += y_step;
+        }
+    }
+}
+
 void RenderObjects(
    u32* pixels,
    f32* wall_raycast_radius,
@@ -600,10 +736,13 @@ void RenderObjects(
 void Render(
     u32* pixels,
     f32* wall_raycast_radius,
-    struct CameraState* camera
+    struct CameraState* camera,
+    u8* geometry_mesh_quarter_edge_is_solid,
+    QuarterEdge* qe_camera // dual quarter edge representing the face that the camera is in.
 ) {
     RenderFloorAndCeiling(pixels, camera);
     RenderWalls(pixels, wall_raycast_radius, camera);
+    RenderWallsViaMesh(pixels, wall_raycast_radius, camera, geometry_mesh_quarter_edge_is_solid, qe_camera);
     RenderObjects(pixels, wall_raycast_radius, camera);
 }
 
@@ -819,7 +958,7 @@ int main(int argc, char *argv[]) {
         state.camera.dir = state.game_state.player.dir;
         state.camera.z = state.game_state.player.z;
 
-        Render(state.pixels, state.wall_raycast_radius, &state.camera);
+        Render(state.pixels, state.wall_raycast_radius, &state.camera, state.game_state.geometry_mesh_quarter_edge_is_solid, state.game_state.player.qe_geometry);
         DecayKeyboardState(&state.keyboard_state);
 
         // Get timer end for all the non-SDL stuff
