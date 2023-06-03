@@ -40,7 +40,18 @@ struct Mapdata MAPDATA;
 
 // The bitmap global variables. These just point into the binary blob.
 struct Bitmap BITMAP;
-struct Bitmap BITMAP_STICK;
+
+// ------------------------------------------------------------------------------
+
+#define FACEDATA_FLAG_SOLID_TO_CAMERA 1
+#define FACEDATA_FLAG_DARK 2 // Whether to render this face a bit darker
+
+struct FaceData {
+    u16 flags;
+    i16 x_offset; // Texture x offset.
+    i16 y_offset; // Texture y offset.
+    u16 texture_id;
+};
 
 // ------------------------------------------------------------------------------
 
@@ -192,18 +203,6 @@ static void LoadAssets() {
                 asset_byte_offset += sizeof(u8);
                 BITMAP.abgr = (u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
                 BITMAP.n_pixels_per_row = BITMAP.n_pixels / BITMAP.n_pixels_per_column;
-                loaded_textures = 1;
-            } else if (strcmp(entry->name, "stick") == 0) {
-                u32 asset_byte_offset = entry->byte_offset;
-                BITMAP_STICK.n_pixels = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
-                asset_byte_offset += sizeof(u32);
-                BITMAP_STICK.n_pixels_per_column = *(u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
-                asset_byte_offset += sizeof(u32);
-                BITMAP_STICK.column_major = ASSETS_BINARY_BLOB[asset_byte_offset];
-                ASSERT(BITMAP_STICK.column_major, "Expected the stick texture to be column-major\n");
-                asset_byte_offset += sizeof(u8);
-                BITMAP_STICK.abgr = (u32*)(ASSETS_BINARY_BLOB + asset_byte_offset);
-                BITMAP_STICK.n_pixels_per_row = BITMAP_STICK.n_pixels / BITMAP_STICK.n_pixels_per_column;
                 loaded_textures = 1;
             } else if (strcmp(entry->name, "mapdata") == 0) {
                 u32 asset_byte_offset = entry->byte_offset;
@@ -371,7 +370,7 @@ void RenderWalls(
     f32 x_rem_cam = camera->pos.x - TILE_WIDTH*x_ind_cam;
     f32 y_rem_cam = camera->pos.y - TILE_WIDTH*y_ind_cam;
 
-    for (int x = 0; x < SCREEN_SIZE_X; x++) {
+    for (int x = SCREEN_SIZE_X/2; x < SCREEN_SIZE_X; x++) {
         
         // Camera to pixel column
         const f32 dw = camera->fov.x/2 - (camera->fov.x*x)/SCREEN_SIZE_X;
@@ -515,6 +514,7 @@ void RenderWallsViaMesh(
     f32* wall_raycast_radius,
     struct CameraState* camera,
     u8* geometry_mesh_quarter_edge_is_solid,
+    struct FaceData* face_data,
     QuarterEdge* qe_camera // dual quarter edge representing the face that the camera is in.
 ) {
     for (int x = 0; x < SCREEN_SIZE_X/2; x++) {
@@ -626,11 +626,12 @@ void RenderWallsViaMesh(
         int y_hi_capped = min(y_hi, SCREEN_SIZE_Y-1);
 
         // Texture x offset determines whether we draw the light or dark version
-        u32 texture_x_offset = 0; // TODO: Figure out light/dark side.
-        u32 texture_y_offset = 0; // TODO: Figure out face lookup from quarter edge.
+        QuarterEdge* qe_face_src = qe_dual->rot->rot->rot;
+        u32 texture_x_offset = ((face_data[qe_face_src->index].flags & FACEDATA_FLAG_DARK) > 0) ? TEXTURE_SIZE : 0;
+        u32 texture_y_offset = face_data[qe_face_src->index].texture_id * TEXTURE_SIZE;
 
         // Calculate where along the segment we intersected.
-        f32 rem = length(sub(pos, *(qe_dual->rot->rot->rot->vertex))) / length(v_face);
+        f32 rem = 1.0f - length(sub(pos, *(qe_face_src->vertex))) / length(v_face);
 
         u32 texture_x = min((int) (TEXTURE_SIZE * rem / TILE_WIDTH), TEXTURE_SIZE-1);
         u32 baseline = GetColumnMajorPixelIndex(&BITMAP, texture_x+texture_x_offset, texture_y_offset);
@@ -738,11 +739,12 @@ void Render(
     f32* wall_raycast_radius,
     struct CameraState* camera,
     u8* geometry_mesh_quarter_edge_is_solid,
+    struct FaceData* face_data,
     QuarterEdge* qe_camera // dual quarter edge representing the face that the camera is in.
 ) {
     RenderFloorAndCeiling(pixels, camera);
     RenderWalls(pixels, wall_raycast_radius, camera);
-    RenderWallsViaMesh(pixels, wall_raycast_radius, camera, geometry_mesh_quarter_edge_is_solid, qe_camera);
+    RenderWallsViaMesh(pixels, wall_raycast_radius, camera, geometry_mesh_quarter_edge_is_solid, face_data, qe_camera);
     RenderObjects(pixels, wall_raycast_radius, camera);
 }
 
@@ -836,12 +838,16 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    // Compute the face data.
     // For each quarter edge, store whether it is solid.
     // Only do this for dual quarter edges.
-    // TODO: Bitvector rather than byte vector.
-    state.game_state.geometry_mesh_quarter_edge_is_solid = (u8*) malloc(DelaunayMeshNumQuarterEdges(state.game_state.geometry_mesh));
-    for (int qe_index = 0; qe_index < DelaunayMeshNumQuarterEdges(state.game_state.geometry_mesh); qe_index ++) {
+    size_t n_quarter_edges = DelaunayMeshNumQuarterEdges(state.game_state.geometry_mesh);
+    struct FaceData* face_data = (struct FaceData*) calloc(n_quarter_edges, sizeof(struct FaceData)); // calloc inits to zero. 
+    state.game_state.geometry_mesh_quarter_edge_is_solid = (u8*) malloc(n_quarter_edges);
+    for (int qe_index = 0; qe_index < n_quarter_edges; qe_index ++) {
+        
         state.game_state.geometry_mesh_quarter_edge_is_solid[qe_index] = 0;
+
         QuarterEdge* qe_dual = DelaunayMeshGetQuarterEdge(state.game_state.geometry_mesh, qe_index);
         if (IsDualEdge(qe_dual)) {
             // Get the centroid;
@@ -860,6 +866,56 @@ int main(int argc, char *argv[]) {
             // If the tile is solid, mark the quarter edge as solid.
             if (MAPDATA.tiles[GetMapDataIndex(&MAPDATA, tile_x, tile_y)] > 0) {
                 state.game_state.geometry_mesh_quarter_edge_is_solid[qe_index] = 1;
+            }
+        } else {
+            // Primal edge.
+            QuarterEdge* qe_primal = qe_dual; // Its actually primal.
+            
+            // AB is the separating edge.
+            const v2* a = qe_primal->vertex;
+            const v2* b = QESym(qe_primal)->vertex;
+
+            // We need both point to be at a tile edge.
+            f32 delta_x = abs(a->x - b->x);
+            f32 delta_y = abs(a->y - b->y);
+
+            if (delta_x < 0.1 && abs(delta_y - 1.0) < 0.1) {
+                // Vertical edge.
+                int tile_x_lo = clamp((int)floorf((a->x - 0.5) / TILE_WIDTH), 0, MAPDATA.n_tiles_x);
+                int tile_x_hi = tile_x_lo + 1;
+                int tile_y    = clamp((int)floorf((a->y + b->y) / (2.0f*TILE_WIDTH)), 0, MAPDATA.n_tiles_y);
+
+                bool lo_is_solid = MAPDATA.tiles[GetMapDataIndex(&MAPDATA, tile_x_lo, tile_y)] > 0;
+                bool hi_is_solid = MAPDATA.tiles[GetMapDataIndex(&MAPDATA, tile_x_hi, tile_y)] > 0;
+
+                if ((lo_is_solid || hi_is_solid) && (lo_is_solid != hi_is_solid)) {
+                    // This is an edge between two tiles of different solidities.
+                    face_data[qe_primal->index].flags |= FACEDATA_FLAG_SOLID_TO_CAMERA;
+                    face_data[qe_primal->index].flags |= FACEDATA_FLAG_DARK; // Vertical edges are dark
+                    if (lo_is_solid) {
+                        face_data[qe_primal->index].texture_id = (MAPDATA.tiles[GetMapDataIndex(&MAPDATA, tile_x_lo, tile_y)] - 1);
+                    } else {
+                        face_data[qe_primal->index].texture_id = (MAPDATA.tiles[GetMapDataIndex(&MAPDATA, tile_x_hi, tile_y)] - 1);
+                    }
+                }
+            } else if (delta_y < 0.1 && abs(delta_x - 1.0) < 0.1) { 
+                // Horizontal edge.
+                int tile_x    = clamp((int)floorf((a->x + b->x) / (2.0f*TILE_WIDTH)), 0, MAPDATA.n_tiles_x);
+                int tile_y_lo = clamp((int)floorf((a->y - 0.5) / TILE_WIDTH), 0, MAPDATA.n_tiles_y);
+                int tile_y_hi = tile_y_lo + 1;
+
+                bool lo_is_solid = MAPDATA.tiles[GetMapDataIndex(&MAPDATA, tile_x, tile_y_lo)] > 0;
+                bool hi_is_solid = MAPDATA.tiles[GetMapDataIndex(&MAPDATA, tile_x, tile_y_hi)] > 0;
+
+                if ((lo_is_solid || hi_is_solid) && (lo_is_solid != hi_is_solid)) {
+                    // This is an edge between two tiles of different solidities.
+                    face_data[qe_primal->index].flags |= FACEDATA_FLAG_SOLID_TO_CAMERA;
+                    if (lo_is_solid) {
+                        face_data[qe_primal->index].texture_id = (MAPDATA.tiles[GetMapDataIndex(&MAPDATA, tile_x, tile_y_lo)] - 1);
+                    } else {
+                        face_data[qe_primal->index].texture_id = (MAPDATA.tiles[GetMapDataIndex(&MAPDATA, tile_x, tile_y_hi)] - 1);
+                    }
+                }
             }
         }
     }
@@ -958,7 +1014,7 @@ int main(int argc, char *argv[]) {
         state.camera.dir = state.game_state.player.dir;
         state.camera.z = state.game_state.player.z;
 
-        Render(state.pixels, state.wall_raycast_radius, &state.camera, state.game_state.geometry_mesh_quarter_edge_is_solid, state.game_state.player.qe_geometry);
+        Render(state.pixels, state.wall_raycast_radius, &state.camera, state.game_state.geometry_mesh_quarter_edge_is_solid, face_data, state.game_state.player.qe_geometry);
         DecayKeyboardState(&state.keyboard_state);
 
         // Get timer end for all the non-SDL stuff
@@ -1119,6 +1175,7 @@ int main(int argc, char *argv[]) {
     free(WAD);
     DeconstructDelaunayMesh(state.game_state.geometry_mesh);
     free(state.game_state.geometry_mesh_quarter_edge_is_solid);
+    free(face_data);
 
     return 0;
 }
