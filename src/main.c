@@ -168,7 +168,6 @@ static void LoadAssets(struct GameMap *game_map)
     {
         free(ASSETS_BINARY_BLOB);
     }
-
     {
         // The format is:
         // HEADER:
@@ -262,6 +261,10 @@ static void LoadAssets(struct GameMap *game_map)
     }
 
     // Load DOOM assets.
+    if (WAD)
+    {
+        free(WAD);
+    }
     {
         FILE *fileptr = fopen("assets/DOOM.WAD", "rb");
         ASSERT(fileptr, "Error opening DOOM WAD\n");
@@ -307,6 +310,10 @@ static void LoadAssets(struct GameMap *game_map)
     }
 
     // Load assets #2
+    if (ASSETS_BINARY_BLOB2)
+    {
+        free(ASSETS_BINARY_BLOB2);
+    }
     {
         // The format is:
         // HEADER:
@@ -389,6 +396,14 @@ static void LoadAssets(struct GameMap *game_map)
 
                 game_map->quarter_edge_index_to_side_info_index = (u16 *)(ASSETS_BINARY_BLOB2 + mesh_offset);
                 mesh_offset += game_map->geometry_mesh->n_quarter_edges * sizeof(u16);
+
+                // Validation - ensure that our indices are all in range
+                for (int i = 0; i < game_map->geometry_mesh->n_quarter_edges; i++)
+                {
+                    u16 side_info_index = game_map->quarter_edge_index_to_side_info_index[i];
+                    ASSERT(side_info_index < game_map->n_side_infos || side_info_index == 0xFFFF,
+                           "Side info index %d, which is the %dth index, is out of bounds\n", side_info_index, i);
+                }
             }
         }
 
