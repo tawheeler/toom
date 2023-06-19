@@ -5,6 +5,8 @@ obj
 *.aux
 *.pdf
 *.log
-assets/assets.bin
-assets/textures.tif
-assets/floor_textures.tif
+
+assets
+toom_billboards
+toom_billboards.zip
+writeup

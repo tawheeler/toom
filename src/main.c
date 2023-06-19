@@ -108,6 +108,8 @@ struct BinaryAsset2TableOfContentEntry
 u8 *ASSETS_BINARY_BLOB2;
 u32 ASSETS_BINARY_BLOB2_SIZE = 0; // number of bytes
 
+#define SIDEINFO_FLAG_DARK 1
+
 struct SideInfo
 {
     u16 flags;
@@ -847,7 +849,9 @@ void RenderWallsViaMesh(
         u32 texture_y_offset = 0; // face_data[qe_face_src->index].texture_id * TEXTURE_SIZE;
         if (side_info_index != 0xFFFF)
         {
-            texture_y_offset = game_map->side_infos[side_info_index].texture_id * TEXTURE_SIZE;
+            struct SideInfo *side_info = game_map->side_infos + side_info_index;
+            texture_x_offset = (side_info->flags & SIDEINFO_FLAG_DARK) > 0 ? TEXTURE_SIZE : 0;
+            texture_y_offset = side_info->texture_id * TEXTURE_SIZE;
         }
 
         // Calculate where along the segment we intersected.
