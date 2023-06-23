@@ -1,5 +1,4 @@
 #include <stdio.h>
-#include <sys/time.h>
 #include <SDL2/SDL.h>
 
 #include "typedefs.h"
@@ -9,6 +8,7 @@
 #include "bitmap.h"
 #include "delaunay_mesh.h"
 #include "game.h"
+#include "platform_metrics.h"
 
 #define ASSERT(_e, ...)               \
     if (!(_e))                        \
@@ -145,20 +145,6 @@ struct
     struct GameState game_state;
     struct KeyBoardState keyboard_state;
 } state;
-
-f32 GetElapsedTimeSec(struct timeval *timeval_start, struct timeval *timeval_end)
-{
-    f32 ms_elapsed = (timeval_end->tv_sec - timeval_start->tv_sec);             // sec
-    ms_elapsed += (timeval_end->tv_usec - timeval_start->tv_usec) / 1000000.0f; // us to s
-    return ms_elapsed;
-}
-
-f64 GetElapsedTimeMillis(struct timeval *timeval_start, struct timeval *timeval_end)
-{
-    f64 ms_elapsed = (timeval_end->tv_sec - timeval_start->tv_sec) * 1000.0; // sec to ms
-    ms_elapsed += (timeval_end->tv_usec - timeval_start->tv_usec) / 1000.0;  // us to ms
-    return ms_elapsed;
-}
 
 static void LoadAssets(struct GameMap *game_map)
 {
@@ -908,10 +894,6 @@ void RenderObjects(
         int monster_frame = clamp((int)(monster_heading_rel * n_patch_entries / (2.0 * PI)), 0, n_patch_entries); // TODO: Better way to handle the clamp?
         // struct PatchEntry *patch_entry = &CYBR_PATCH_ENTRIES[monster_frame];
         struct PatchEntry *patch_entry = &SKEL_PATCH_ENTRIES[monster_frame];
-        printf("Camera Heading: %.3f\n", camera_heading * 180.0 / 3.14159);
-        printf("Monster Heading in Camera Body: %.3f\n", monster_heading_in_cam_body * 180.0 / 3.14159);
-        printf("Monster Heading Rel: %.3f\n", monster_heading_rel * 180.0 / 3.14159);
-        printf("Monster Frame: %3d\n", monster_frame);
 
         // Calculate the column pixel bounds
         int sprite_size_y = patch_entry->patch->size_y;
@@ -984,14 +966,35 @@ void Render(
     QuarterEdge *qe_camera // dual quarter edge representing the face that the camera is in.
 )
 {
+    u64 rtdsc_render_start = ReadCPUTimer();
     RenderFloorAndCeiling(pixels, camera);
+    u64 rtdsc_post_floor_and_ceiling = ReadCPUTimer();
     RenderWalls(pixels, wall_raycast_radius, camera);
+    u64 rtdsc_post_walls = ReadCPUTimer();
     RenderWallsViaMesh(pixels, wall_raycast_radius, camera, game_map, qe_camera);
+    u64 rtdsc_post_walls_via_mesh = ReadCPUTimer();
     RenderObjects(pixels, wall_raycast_radius, camera);
+    u64 rtdsc_post_objects = ReadCPUTimer();
+
+    u64 dtimer_tot = rtdsc_post_objects - rtdsc_render_start;
+    u64 dtimer_floor_and_ceiling = rtdsc_post_floor_and_ceiling - rtdsc_render_start;
+    u64 dtimer_walls = rtdsc_post_walls - rtdsc_post_floor_and_ceiling;
+    u64 dtimer_walls_via_mesh = rtdsc_post_walls_via_mesh - rtdsc_post_walls;
+    u64 dtimer_objects = rtdsc_post_objects - rtdsc_post_walls_via_mesh;
+
+    printf("[Render]\n");
+    printf("  RenderFloorAndCeiling: %zu (%.2f%%)\n", dtimer_floor_and_ceiling, (100.0 * dtimer_floor_and_ceiling) / dtimer_tot);
+    printf("  RenderWalls:           %zu (%.2f%%)\n", dtimer_walls, (100.0 * dtimer_walls) / dtimer_tot);
+    printf("  RenderWallsViaMesh:    %zu (%.2f%%)\n", dtimer_walls_via_mesh, (100.0 * dtimer_walls_via_mesh) / dtimer_tot);
+    printf("  RenderObjects:         %zu (%.2f%%)\n\n", dtimer_objects, (100.0 * dtimer_objects) / dtimer_tot);
 }
 
 int main(int argc, char *argv[])
 {
+    // Estimate our clock frequency
+    u64 cpu_timer_freq = EstimateCPUTimerFreq(100);
+
+    // Create our game map
     struct GameMap game_map;
 
     // Load our assets
@@ -1063,18 +1066,14 @@ int main(int argc, char *argv[])
     ClearKeyboardState(&state.keyboard_state);
 
     // Time structs
-    struct timeval timeval_frame_start, timeval_frame_end, timeval_tick, timeval_tick_prev;
-    gettimeofday(&timeval_frame_start, NULL);
-    gettimeofday(&timeval_frame_end, NULL);
-    gettimeofday(&timeval_tick, NULL);
-    gettimeofday(&timeval_tick_prev, NULL);
+    u64 rtdsc_tick = 0;
+    u64 rtdsc_tick_prev = 0;
 
     // Main loop
     state.quit = 0;
     while (state.quit == 0)
     {
-        // Time of the start of the frame
-        gettimeofday(&timeval_frame_start, NULL);
+        u64 rtdsc_frame_start = ReadCPUTimer();
 
         SDL_Event event;
         while (SDL_PollEvent(&event))
@@ -1211,12 +1210,14 @@ int main(int argc, char *argv[])
                 }
             }
         }
+        u64 rtdsc_post_poll_events = ReadCPUTimer();
 
         // Calc elapsed time since previous tick, then run tick
-        gettimeofday(&timeval_tick, NULL);
-        const f32 dt = GetElapsedTimeSec(&timeval_tick_prev, &timeval_tick);
+        rtdsc_tick = ReadCPUTimer();
+        const f32 dt = GetElapsedCPUTimeMs(rtdsc_tick_prev, rtdsc_tick, cpu_timer_freq) / 1000.0f;
         Tick(&state.game_state, dt, &state.keyboard_state);
-        timeval_tick_prev = timeval_tick;
+        rtdsc_tick_prev = rtdsc_tick;
+        u64 rtdsc_post_tick = ReadCPUTimer();
 
         // Check for a keyboard press to reload our assets
         if (IsNewlyPressed(state.keyboard_state.r))
@@ -1232,18 +1233,26 @@ int main(int argc, char *argv[])
         state.camera.z = state.game_state.player.z;
 
         Render(state.pixels, state.wall_raycast_radius, &state.camera, &game_map, state.game_state.player.qe_geometry);
+        u64 rtdsc_post_render = ReadCPUTimer();
+
         DecayKeyboardState(&state.keyboard_state);
+        u64 rtdsc_post_decay_keyboard_state = ReadCPUTimer();
 
         // Get timer end for all the non-SDL stuff
-        gettimeofday(&timeval_frame_end, NULL);
-        const f64 game_ms_elapsed = GetElapsedTimeMillis(&timeval_frame_start, &timeval_frame_end);
+        const f64 game_ms_elapsed = GetElapsedCPUTimeMs(rtdsc_frame_start, rtdsc_post_decay_keyboard_state, cpu_timer_freq);
 
-        static f64 tot_game_ms_elapsed = 0.0f;
-        static i64 n_frames = 0;
-        tot_game_ms_elapsed += game_ms_elapsed;
-        n_frames += 1;
+        u64 dtimer_tot = rtdsc_post_decay_keyboard_state - rtdsc_frame_start;
+        u64 dtimer_poll = rtdsc_post_poll_events - rtdsc_frame_start;
+        u64 dtimer_tick = rtdsc_post_tick - rtdsc_post_poll_events;
+        u64 dtimer_render = rtdsc_post_render - rtdsc_post_tick;
+        u64 dtimer_dkbs = rtdsc_post_decay_keyboard_state - rtdsc_post_render;
 
-        printf("Game: %.3f ms, %.1f fps, frame dt %.3fs, mean game ms: %.3f\n", game_ms_elapsed, 1000.0f / max(1.0f, game_ms_elapsed), dt, tot_game_ms_elapsed / n_frames);
+        printf("Frame dt:   %.4fms, %.1f fps\n", dt * 1000.0, 1000.0f / max(1.0f, game_ms_elapsed));
+        printf("Total time: %.4fms (CPU freq %zu)\n", game_ms_elapsed, cpu_timer_freq);
+        printf("  Poll:   %zu (%.2f%%)\n", dtimer_poll, (100.0 * dtimer_poll) / dtimer_tot);
+        printf("  Tick:   %zu (%.2f%%)\n", dtimer_tick, (100.0 * dtimer_tick) / dtimer_tot);
+        printf("  Render: %zu (%.2f%%)\n", dtimer_render, (100.0 * dtimer_render) / dtimer_tot);
+        printf("  DKBS:   %zu (%.2f%%)\n\n", dtimer_dkbs, (100.0 * dtimer_dkbs) / dtimer_tot);
 
         SDL_UpdateTexture(state.texture, NULL, state.pixels, SCREEN_SIZE_X * 4);
         SDL_RenderCopyEx(
@@ -1392,11 +1401,15 @@ int main(int argc, char *argv[])
     SDL_DestroyWindow(state.window);
     SDL_DestroyWindow(debug_window);
 
+    // Free our game state
+    // DeconstructDelaunayMesh(state.game_state.geometry_mesh);
+    free(game_map.geometry_mesh->quarter_edges);
+    free(game_map.geometry_mesh);
+
     // Free our assets
     free(ASSETS_BINARY_BLOB);
     free(WAD);
-    DeconstructDelaunayMesh(state.game_state.geometry_mesh);
-    free(game_map.geometry_mesh);
+    free(ASSETS_BINARY_BLOB2);
 
     return 0;
 }
