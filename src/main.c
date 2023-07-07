@@ -279,11 +279,12 @@ static void LoadAssets(struct GameMap *game_map)
             // printf("Entry %d: %.8s at offset %d with size %d\n", directory_index, entry->name, entry->byte_offset, entry->size);
             byte_index += sizeof(struct WadDirectoryEntry);
 
-            if (strcmp(entry->name, "PLAYPAL") == 0)
-            {
-                PALETTE_OFFSET = entry->byte_offset;
-            }
-            else if (strncmp(entry->name, "CYBRE", 5) == 0)
+            // if (strcmp(entry->name, "PLAYPAL") == 0)
+            // {
+            //     PALETTE_OFFSET = entry->byte_offset;
+            // }
+            // else
+            if (strncmp(entry->name, "CYBRE", 5) == 0)
             {
                 int frame_index = entry->name[5] - '1';
                 CYBR_PATCH_ENTRIES[frame_index].byte_offset = entry->byte_offset;
@@ -338,7 +339,11 @@ static void LoadAssets(struct GameMap *game_map)
             printf("Entry %d: %.16s at offset %d with size %d\n", toc_index, entry->name, entry->offset, entry->size);
             offset += sizeof(struct BinaryAsset2TableOfContentEntry);
 
-            if (strcmp(entry->name, "geometry_mesh") == 0)
+            if (strcmp(entry->name, "palette") == 0)
+            {
+                PALETTE_OFFSET = entry->offset;
+            }
+            else if (strcmp(entry->name, "geometry_mesh") == 0)
             {
                 struct DelaunayMesh *mesh = (struct DelaunayMesh *)malloc(sizeof(struct DelaunayMesh));
                 game_map->geometry_mesh = mesh;
@@ -771,39 +776,42 @@ void RenderWallsViaMesh(
                 pos.y += min_interp * pos_next_delta.y;
                 qe_dual = qe_dual_next;
 
+                // TODO - reenable.
                 // Render the ceiling above the threshold.
                 // Calculate the ray length
-                const f32 ray_len = max(length(sub(pos, camera->pos)), 0.01); // TODO: Remove this `max` once we have proper collision
+                // const f32 ray_len = max(length(sub(pos, camera->pos)), 0.01); // TODO: Remove this `max` once we have proper collision
 
-                // Calculate the pixel bounds that we fill the wall in for
-                int y_hi = (int)(SCREEN_SIZE_Y / 2.0f + cam_len * (WALL_HEIGHT - camera->z) / ray_len * SCREEN_SIZE_Y / camera->fov.y);
-                for (int y = y_hi + 1; y < SCREEN_SIZE_Y; y++)
-                {
-                    // Radius
-                    f32 zpp = (y - (SCREEN_SIZE_Y / 2.0f)) * (camera->fov.y / SCREEN_SIZE_Y);
-                    f32 radius = (WALL_HEIGHT - camera->z) / zpp; // TODO: Precompute for each y
+                // // Calculate the pixel bounds that we fill the wall in for
+                // int y_hi = (int)(SCREEN_SIZE_Y / 2.0f + cam_len * (WALL_HEIGHT - camera->z) / ray_len * SCREEN_SIZE_Y / camera->fov.y);
+                // for (int y = y_hi + 1; y < SCREEN_SIZE_Y; y++)
+                // {
+                //     // Radius
+                //     f32 zpp = (y - (SCREEN_SIZE_Y / 2.0f)) * (camera->fov.y / SCREEN_SIZE_Y);
+                //     f32 radius = (WALL_HEIGHT - camera->z) / zpp; // TODO: Precompute for each y
 
-                    // Location of the ray's intersection
-                    f32 hit_x = camera->pos.x + radius * cp.x;
-                    f32 hit_y = camera->pos.y + radius * cp.y;
+                //     // Location of the ray's intersection
+                //     f32 hit_x = camera->pos.x + radius * cp.x;
+                //     f32 hit_y = camera->pos.y + radius * cp.y;
 
-                    int x_ind_hit = (int)(floorf(hit_x / TILE_WIDTH));
-                    int y_ind_hit = (int)(floorf(hit_y / TILE_WIDTH));
-                    f32 x_rem_hit = hit_x - TILE_WIDTH * x_ind_hit;
-                    f32 y_rem_hit = hit_y - TILE_WIDTH * y_ind_hit;
-                    x_ind_hit = clamp(x_ind_hit, 0, MAPDATA.n_tiles_x - 1);
-                    y_ind_hit = clamp(y_ind_hit, 0, MAPDATA.n_tiles_y - 1);
+                //     int x_ind_hit = (int)(floorf(hit_x / TILE_WIDTH));
+                //     int y_ind_hit = (int)(floorf(hit_y / TILE_WIDTH));
+                //     f32 x_rem_hit = hit_x - TILE_WIDTH * x_ind_hit;
+                //     f32 y_rem_hit = hit_y - TILE_WIDTH * y_ind_hit;
+                //     x_ind_hit = clamp(x_ind_hit, 0, MAPDATA.n_tiles_x - 1);
+                //     y_ind_hit = clamp(y_ind_hit, 0, MAPDATA.n_tiles_y - 1);
 
-                    // TODO: Get the texture from the triangle data.
-                    u32 texture_x_offset = 0;
-                    u32 texture_y_offset = (MAPDATA.ceiling[GetMapDataIndex(&MAPDATA, x_ind_hit, y_ind_hit)] - 1) * TEXTURE_SIZE;
+                //     // TODO: Get the texture from the triangle data.
+                //     u32 texture_x_offset = 0;
+                //     u32 texture_y_offset = (MAPDATA.ceiling[GetMapDataIndex(&MAPDATA, x_ind_hit, y_ind_hit)] - 1) * TEXTURE_SIZE;
 
-                    u32 texture_x = (int)(x_rem_hit / TILE_WIDTH * TEXTURE_SIZE);
-                    u32 texture_y = (int)(y_rem_hit / TILE_WIDTH * TEXTURE_SIZE);
+                //     u32 texture_x = (int)(x_rem_hit / TILE_WIDTH * TEXTURE_SIZE);
+                //     u32 texture_y = (int)(y_rem_hit / TILE_WIDTH * TEXTURE_SIZE);
 
-                    u32 color = GetColumnMajorPixelAt(&BITMAP, texture_x + texture_x_offset, texture_y + texture_y_offset);
-                    pixels[(y * SCREEN_SIZE_X) + x] = color;
-                }
+                //     u32 color = GetColumnMajorPixelAt(&BITMAP, texture_x + texture_x_offset, texture_y + texture_y_offset);
+                //     pixels[(y * SCREEN_SIZE_X) + x] = color;
+                // }
+
+                // TODO: Render floor
 
                 side_info_index = game_map->quarter_edge_index_to_side_info_index[qe_side->index];
                 if (side_info_index != 0xFFFF)
