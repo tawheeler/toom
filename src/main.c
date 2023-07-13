@@ -1091,6 +1091,13 @@ int main(int argc, char *argv[])
                 state.quit = 1;
                 break;
             }
+            else if (event.type == SDL_WINDOWEVENT &&
+                     event.window.event == SDL_WINDOWEVENT_CLOSE &&
+                     (event.window.windowID == SDL_GetWindowID(state.window)))
+            {
+                state.quit = 1;
+                break;
+            }
             else if (event.type == SDL_KEYDOWN)
             {
                 switch (event.key.keysym.sym)
