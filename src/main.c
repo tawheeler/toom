@@ -503,176 +503,12 @@ void RenderFloorAndCeiling(
 void RenderWalls(
     u32 *pixels,
     f32 *wall_raycast_radius,
-    struct CameraState *camera)
-{
-    // Get camera location's cell coordinates
-    int x_ind_cam = (int)(floorf(camera->pos.x / TILE_WIDTH));
-    int y_ind_cam = (int)(floorf(camera->pos.y / TILE_WIDTH));
-    f32 x_rem_cam = camera->pos.x - TILE_WIDTH * x_ind_cam;
-    f32 y_rem_cam = camera->pos.y - TILE_WIDTH * y_ind_cam;
-
-    for (int x = SCREEN_SIZE_X / 2; x < SCREEN_SIZE_X; x++)
-    {
-
-        // Camera to pixel column
-        const f32 dw = camera->fov.x / 2 - (camera->fov.x * x) / SCREEN_SIZE_X;
-        const v2 cp = {
-            camera->dir.x - dw * camera->dir.y,
-            camera->dir.y + dw * camera->dir.x};
-
-        // Distance from the camera to the column
-        const f32 cam_len = length((cp));
-
-        // Ray direction through this column
-        const v2 dir = {cp.x / cam_len, cp.y / cam_len};
-
-        // Start at the camera pos
-        int x_ind = x_ind_cam;
-        int y_ind = y_ind_cam;
-        f32 x_rem = x_rem_cam;
-        f32 y_rem = y_rem_cam;
-
-        // We will be raycasting through cells of unit width.
-        // Our ray's position vs time is:
-        // x(t) = x_rem + dir.x * dt
-        // y(t) = y_rem + dir.y * dt
-
-        // We cross x = 0          if dir.x < 0, at dt = -x_rem/dir.x
-        // We cross x = TILE_WIDTH if dir.x > 0, at dt = (TILE_WIDTH-x_rem)/dir.x
-        // We cross y = 0          if dir.y < 0, at dt = -y_rem/dir.y
-        // We cross y = TILE_WIDTH if dir.y > 0, at dt = (TILE_WIDTH-y_rem)/dir.y
-
-        // We can generalize this to:
-        //   dx_ind_dir = -1 if dir.x < 0, at dt = -1/dir.x * x_rem + 0.0
-        //   dx_ind_dir =  1 if dir.x > 0, at dt = -1/dir.x * x_rem + TILE_WIDTH/dir.x
-        //   dx_ind_dir =  0 if dir.x = 0, at dt =        0 * x_rem + INFINITY
-        //   dy_ind_dir = -1 if dir.y < 0, at dt = -1/dir.y * y_rem + 0.0
-        //   dy_ind_dir =  1 if dir.y > 0, at dt = -1/dir.y * y_rem + TILE_WIDTH/dir.y
-        //   dy_ind_dir =  0 if dir.x = 0, at dt =        0 * y_rem + INFINITY
-
-        int dx_ind_dir = 0;
-        f32 dx_a = 0.0;
-        f32 dx_b = INFINITY;
-        if (dir.x < 0)
-        {
-            dx_ind_dir = -1;
-            dx_a = -1.0f / dir.x;
-            dx_b = 0.0;
-        }
-        else if (dir.x > 0)
-        {
-            dx_ind_dir = 1;
-            dx_a = -1.0f / dir.x;
-            dx_b = TILE_WIDTH / dir.x;
-        }
-
-        int dy_ind_dir = 0;
-        f32 dy_a = 0.0;
-        f32 dy_b = INFINITY;
-        if (dir.y < 0)
-        {
-            dy_ind_dir = -1;
-            dy_a = -1.0f / dir.y;
-            dy_b = 0.0;
-        }
-        else if (dir.y > 0)
-        {
-            dy_ind_dir = 1;
-            dy_a = -1.0f / dir.y;
-            dy_b = TILE_WIDTH / dir.y;
-        }
-
-        // Step through cells until we hit an occupied cell
-        int n_steps = 0;
-        int dx_ind, dy_ind;
-        while (n_steps < 100)
-        {
-            n_steps += 1;
-
-            f32 dt_best = INFINITY;
-            dx_ind = 0;
-            dy_ind = 0;
-
-            f32 dt_x = dx_a * x_rem + dx_b;
-            f32 dt_y = dy_a * y_rem + dy_b;
-            if (dt_x < dt_y)
-            {
-                dt_best = dt_x;
-                dx_ind = dx_ind_dir;
-                dy_ind = 0;
-            }
-            else
-            {
-                dt_best = dt_y;
-                dx_ind = 0;
-                dy_ind = dy_ind_dir;
-            }
-
-            // Move up to the next cell
-            x_ind += dx_ind;
-            y_ind += dy_ind;
-            x_rem += dir.x * dt_best - TILE_WIDTH * dx_ind;
-            y_rem += dir.y * dt_best - TILE_WIDTH * dy_ind;
-
-            // Check to see if the new cell is solid
-            if (MAPDATA.tiles[GetMapDataIndex(&MAPDATA, x_ind, y_ind)] > 0)
-            {
-                break;
-            }
-        }
-
-        // Calculate the collision location
-        const v2 collision = {
-            TILE_WIDTH * x_ind + x_rem,
-            TILE_WIDTH * y_ind + y_rem};
-
-        // Calculate the ray length
-        const f32 ray_len = max(length(sub(collision, camera->pos)), 0.01); // TODO: Remove this `max` once we have proper collision
-        wall_raycast_radius[x] = ray_len;
-
-        // Calculate the pixel bounds that we fill the wall in for
-        int y_lo = (int)(SCREEN_SIZE_Y / 2.0f - cam_len * camera->z / ray_len * SCREEN_SIZE_Y / camera->fov.y);
-        int y_hi = (int)(SCREEN_SIZE_Y / 2.0f + cam_len * (WALL_HEIGHT - camera->z) / ray_len * SCREEN_SIZE_Y / camera->fov.y);
-        int y_lo_capped = max(y_lo, 0);
-        int y_hi_capped = min(y_hi, SCREEN_SIZE_Y - 1);
-
-        // Texture x offset determines whether we draw the light or dark version
-        u32 texture_x_offset = dx_ind == 0 ? 0 : TEXTURE_SIZE;
-        u32 texture_y_offset = (MAPDATA.tiles[GetMapDataIndex(&MAPDATA, x_ind, y_ind)] - 1) * TEXTURE_SIZE;
-
-        f32 rem = 0.0f;
-        if (dx_ind == 0)
-        {
-            rem = dy_ind < 0 ? TILE_WIDTH - x_rem : x_rem;
-        }
-        else
-        {
-            rem = dx_ind < 0 ? y_rem : TILE_WIDTH - y_rem;
-        }
-        u32 texture_x = min((int)(TEXTURE_SIZE * rem / TILE_WIDTH), TEXTURE_SIZE - 1);
-        u32 baseline = GetColumnMajorPixelIndex(&BITMAP, texture_x + texture_x_offset, texture_y_offset);
-        u32 denom = max(1, y_hi - y_lo);
-        f32 y_loc = (f32)((y_hi - y_hi_capped) * TEXTURE_SIZE) / denom;
-        f32 y_step = (f32)(TEXTURE_SIZE) / denom;
-        for (int y = y_hi_capped; y >= y_lo_capped; y--)
-        {
-            u32 texture_y = min((u32)(y_loc), TEXTURE_SIZE - 1);
-            u32 color = BITMAP.abgr[texture_y + baseline];
-            pixels[(y * SCREEN_SIZE_X) + x] = color;
-            y_loc += y_step;
-        }
-    }
-}
-
-void RenderWallsViaMesh(
-    u32 *pixels,
-    f32 *wall_raycast_radius,
     struct CameraState *camera,
     struct GameMap *game_map,
     QuarterEdge *qe_camera // dual quarter edge representing the face that the camera is in.
 )
 {
-    for (int x = 0; x < SCREEN_SIZE_X / 2; x++)
+    for (int x = 0; x < SCREEN_SIZE_X; x++)
     {
 
         // Camera to pixel column
@@ -952,7 +788,7 @@ void RenderObjects(
                     else if (texture_y > y_texture_skip)
                     {
                         u8 color_index = DATA[patch_entry->byte_offset + column_offset + 3 + texture_y - y_texture_skip]; // Index into the DOOM color palette.
-                        u32 color = *(u32 *)(WAD + PALETTE_OFFSET + 3 * color_index);
+                        u32 color = *(u32 *)(ASSETS_BINARY_BLOB2 + PALETTE_OFFSET + 3 * color_index);
                         color |= 0xFF000000; // Set alpha to full.
                         pixels[(y * SCREEN_SIZE_X) + x] = color;
                     }
@@ -977,23 +813,19 @@ void Render(
     u64 rtdsc_render_start = ReadCPUTimer();
     RenderFloorAndCeiling(pixels, camera);
     u64 rtdsc_post_floor_and_ceiling = ReadCPUTimer();
-    RenderWalls(pixels, wall_raycast_radius, camera);
+    RenderWalls(pixels, wall_raycast_radius, camera, game_map, qe_camera);
     u64 rtdsc_post_walls = ReadCPUTimer();
-    RenderWallsViaMesh(pixels, wall_raycast_radius, camera, game_map, qe_camera);
-    u64 rtdsc_post_walls_via_mesh = ReadCPUTimer();
     RenderObjects(pixels, wall_raycast_radius, camera);
     u64 rtdsc_post_objects = ReadCPUTimer();
 
     u64 dtimer_tot = rtdsc_post_objects - rtdsc_render_start;
     u64 dtimer_floor_and_ceiling = rtdsc_post_floor_and_ceiling - rtdsc_render_start;
     u64 dtimer_walls = rtdsc_post_walls - rtdsc_post_floor_and_ceiling;
-    u64 dtimer_walls_via_mesh = rtdsc_post_walls_via_mesh - rtdsc_post_walls;
-    u64 dtimer_objects = rtdsc_post_objects - rtdsc_post_walls_via_mesh;
+    u64 dtimer_objects = rtdsc_post_objects - rtdsc_post_walls;
 
     printf("[Render]\n");
     printf("  RenderFloorAndCeiling: %zu (%.2f%%)\n", dtimer_floor_and_ceiling, (100.0 * dtimer_floor_and_ceiling) / dtimer_tot);
     printf("  RenderWalls:           %zu (%.2f%%)\n", dtimer_walls, (100.0 * dtimer_walls) / dtimer_tot);
-    printf("  RenderWallsViaMesh:    %zu (%.2f%%)\n", dtimer_walls_via_mesh, (100.0 * dtimer_walls_via_mesh) / dtimer_tot);
     printf("  RenderObjects:         %zu (%.2f%%)\n\n", dtimer_objects, (100.0 * dtimer_objects) / dtimer_tot);
 }
 
