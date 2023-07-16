@@ -64,15 +64,15 @@ struct CameraState
 // ------------------------------------------------------------------------------
 // DOOM Assets
 
-u8 *WAD = NULL;
-u32 WAD_SIZE = 0; // number of bytes
+// u8 *WAD = NULL;
+// u32 WAD_SIZE = 0; // number of bytes
 
-struct WadDirectoryEntry
-{
-    u32 byte_offset;
-    u32 size;
-    char name[8];
-};
+// struct WadDirectoryEntry
+// {
+//     u32 byte_offset;
+//     u32 size;
+//     char name[8];
+// };
 
 //  Each palette in the PLAYPAL lump contains 256 colors totaling 768 bytes,
 //  where each color is broken into three unsigned bytes. Each of these color components (red, green, and blue) range between 0 and 255.
@@ -107,25 +107,6 @@ struct BinaryAsset2TableOfContentEntry
 
 u8 *ASSETS_BINARY_BLOB2;
 u32 ASSETS_BINARY_BLOB2_SIZE = 0; // number of bytes
-
-#define SIDEINFO_FLAG_DARK 1
-
-struct SideInfo
-{
-    u16 flags;
-    u16 texture_id;
-    i16 x_offset;
-    i16 y_offset;
-};
-
-struct GameMap
-{
-    struct DelaunayMesh *geometry_mesh;
-
-    u32 n_side_infos;
-    struct SideInfo *side_infos;
-    u16 *quarter_edge_index_to_side_info_index;
-};
 
 // ------------------------------------------------------------------------------
 
@@ -249,54 +230,54 @@ static void LoadAssets(struct GameMap *game_map)
     }
 
     // Load DOOM assets.
-    if (WAD)
-    {
-        free(WAD);
-    }
-    {
-        FILE *fileptr = fopen("assets/DOOM.WAD", "rb");
-        ASSERT(fileptr, "Error opening DOOM WAD\n");
+    // if (WAD)
+    // {
+    //     free(WAD);
+    // }
+    // {
+    //     FILE *fileptr = fopen("assets/DOOM.WAD", "rb");
+    //     ASSERT(fileptr, "Error opening DOOM WAD\n");
 
-        // Count the number of bytes
-        fseek(fileptr, 0, SEEK_END);
-        WAD_SIZE = ftell(fileptr);
+    //     // Count the number of bytes
+    //     fseek(fileptr, 0, SEEK_END);
+    //     WAD_SIZE = ftell(fileptr);
 
-        // Read in the WAD file
-        fseek(fileptr, 0, SEEK_SET);
-        WAD = (u8 *)malloc(WAD_SIZE);
-        ASSERT(WAD, "Failed to allocate DOOM WAD\n");
-        ASSERT(fread(WAD, sizeof(u8), WAD_SIZE, fileptr) == WAD_SIZE, "Failed to read DOOM WAD\n");
+    //     // Read in the WAD file
+    //     fseek(fileptr, 0, SEEK_SET);
+    //     WAD = (u8 *)malloc(WAD_SIZE);
+    //     ASSERT(WAD, "Failed to allocate DOOM WAD\n");
+    //     ASSERT(fread(WAD, sizeof(u8), WAD_SIZE, fileptr) == WAD_SIZE, "Failed to read DOOM WAD\n");
 
-        u32 n_lumps = *(u32 *)(WAD + 0x04);
-        u32 dir_loc = *(u32 *)(WAD + 0x08);
+    //     u32 n_lumps = *(u32 *)(WAD + 0x04);
+    //     u32 dir_loc = *(u32 *)(WAD + 0x08);
 
-        // Process the directory
-        bool loaded_patch = 0;
-        u32 byte_index = dir_loc;
-        for (u32 directory_index = 0; directory_index < n_lumps; directory_index++)
-        {
-            struct WadDirectoryEntry *entry = (struct WadDirectoryEntry *)(WAD + byte_index);
-            // printf("Entry %d: %.8s at offset %d with size %d\n", directory_index, entry->name, entry->byte_offset, entry->size);
-            byte_index += sizeof(struct WadDirectoryEntry);
+    //     // Process the directory
+    //     bool loaded_patch = 0;
+    //     u32 byte_index = dir_loc;
+    //     for (u32 directory_index = 0; directory_index < n_lumps; directory_index++)
+    //     {
+    //         struct WadDirectoryEntry *entry = (struct WadDirectoryEntry *)(WAD + byte_index);
+    //         // printf("Entry %d: %.8s at offset %d with size %d\n", directory_index, entry->name, entry->byte_offset, entry->size);
+    //         byte_index += sizeof(struct WadDirectoryEntry);
 
-            // if (strcmp(entry->name, "PLAYPAL") == 0)
-            // {
-            //     PALETTE_OFFSET = entry->byte_offset;
-            // }
-            // else
-            if (strncmp(entry->name, "CYBRE", 5) == 0)
-            {
-                int frame_index = entry->name[5] - '1';
-                CYBR_PATCH_ENTRIES[frame_index].byte_offset = entry->byte_offset;
-                CYBR_PATCH_ENTRIES[frame_index].patch = (struct Patch *)(WAD + entry->byte_offset);
-                loaded_patch = 1;
-            }
-        }
+    //         // if (strcmp(entry->name, "PLAYPAL") == 0)
+    //         // {
+    //         //     PALETTE_OFFSET = entry->byte_offset;
+    //         // }
+    //         // else
+    //         if (strncmp(entry->name, "CYBRE", 5) == 0)
+    //         {
+    //             int frame_index = entry->name[5] - '1';
+    //             CYBR_PATCH_ENTRIES[frame_index].byte_offset = entry->byte_offset;
+    //             CYBR_PATCH_ENTRIES[frame_index].patch = (struct Patch *)(WAD + entry->byte_offset);
+    //             loaded_patch = 1;
+    //         }
+    //     }
 
-        fclose(fileptr);
+    //     fclose(fileptr);
 
-        ASSERT(loaded_patch > 0, "Patch not loaded from assets\n");
-    }
+    //     ASSERT(loaded_patch > 0, "Patch not loaded from assets\n");
+    // }
 
     // Load assets #2
     if (ASSETS_BINARY_BLOB2)
@@ -710,7 +691,6 @@ void RenderObjects(
 {
     static f32 DOOM_HEIGHT_PER_PIX = ((f32)(DOOM_PIX_PER_WALL_WIDTH)) / (TEXTURE_SIZE * TEXTURE_SIZE);
 
-    // u8* DATA = WAD;
     u8 *DATA = ASSETS_BINARY_BLOB;
 
     f32 camera_heading = atan2(camera->dir.y, camera->dir.x); // TODO: inefficient
@@ -891,16 +871,13 @@ int main(int argc, char *argv[])
     state.camera.fov.x = 1.5f;
     state.camera.fov.y = state.camera.fov.x * SCREEN_SIZE_Y / SCREEN_SIZE_X;
 
-    // TODO
-    state.game_state.geometry_mesh = game_map.geometry_mesh;
-
     // Init player state
     state.game_state.player.pos = (v2){5.0, 5.0};
     state.game_state.player.dir = (v2){0.0, 0.0};
     state.game_state.player.vel = (v2){0.0, 0.0};
     state.game_state.player.omega = 0.0f;
     state.game_state.player.z = 0.4;
-    state.game_state.player.qe_geometry = DelaunayMeshGetEnclosingTriangle2(state.game_state.geometry_mesh, &(state.game_state.player.pos));
+    state.game_state.player.qe_geometry = DelaunayMeshGetEnclosingTriangle2(game_map.geometry_mesh, &(state.game_state.player.pos));
 
     // Init keyboard
     ClearKeyboardState(&state.keyboard_state);
@@ -1062,7 +1039,7 @@ int main(int argc, char *argv[])
         // Calc elapsed time since previous tick, then run tick
         rtdsc_tick = ReadCPUTimer();
         const f32 dt = GetElapsedCPUTimeMs(rtdsc_tick_prev, rtdsc_tick, cpu_timer_freq) / 1000.0f;
-        Tick(&state.game_state, dt, &state.keyboard_state);
+        Tick(&state.game_state, dt, &state.keyboard_state, &game_map);
         rtdsc_tick_prev = rtdsc_tick;
         u64 rtdsc_post_tick = ReadCPUTimer();
 
@@ -1192,11 +1169,11 @@ int main(int argc, char *argv[])
             }
 
             { // Render the mesh
-                for (int qe_index = 0; qe_index < DelaunayMeshNumQuarterEdges(state.game_state.geometry_mesh); qe_index++)
+                for (int qe_index = 0; qe_index < DelaunayMeshNumQuarterEdges(game_map.geometry_mesh); qe_index++)
                 {
-                    QuarterEdge *qe = DelaunayMeshGetQuarterEdge(state.game_state.geometry_mesh, qe_index);
+                    QuarterEdge *qe = DelaunayMeshGetQuarterEdge(game_map.geometry_mesh, qe_index);
 
-                    if (IsPrimalEdge(qe) && !DelaunayMeshIsBoundaryVertex(state.game_state.geometry_mesh, qe->vertex))
+                    if (IsPrimalEdge(qe) && !DelaunayMeshIsBoundaryVertex(game_map.geometry_mesh, qe->vertex))
                     {
                         SDL_SetRenderDrawColor(debug_renderer, 0xFF, 0x48, 0xCF, 0xFF);
                         if (game_map.quarter_edge_index_to_side_info_index[qe->index] != 0xFFFF)
@@ -1210,7 +1187,7 @@ int main(int argc, char *argv[])
 
                         const v2 *a = qe->vertex;
                         const v2 *b = qe_sym->vertex;
-                        if (a > b && !DelaunayMeshIsBoundaryVertex(state.game_state.geometry_mesh, b))
+                        if (a > b && !DelaunayMeshIsBoundaryVertex(game_map.geometry_mesh, b))
                         { // Avoid rendering edges twice
                             int ax = a->x / TILE_WIDTH * pix_per_tile + offset_x;
                             int ay = debug_window_size_xy - (a->y / TILE_WIDTH * pix_per_tile + offset_y);
@@ -1226,9 +1203,9 @@ int main(int argc, char *argv[])
                 SDL_SetRenderDrawColor(debug_renderer, 0x48, 0x48, 0xCF, 0xFF);
 
                 // The quarter edge is a dual edge, and its containing triangle is solid.
-                const v2 *a = DelaunayMeshGetTriangleVertex1(state.game_state.geometry_mesh, state.game_state.player.qe_geometry);
-                const v2 *b = DelaunayMeshGetTriangleVertex2(state.game_state.geometry_mesh, state.game_state.player.qe_geometry);
-                const v2 *c = DelaunayMeshGetTriangleVertex3(state.game_state.geometry_mesh, state.game_state.player.qe_geometry);
+                const v2 *a = DelaunayMeshGetTriangleVertex1(game_map.geometry_mesh, state.game_state.player.qe_geometry);
+                const v2 *b = DelaunayMeshGetTriangleVertex2(game_map.geometry_mesh, state.game_state.player.qe_geometry);
+                const v2 *c = DelaunayMeshGetTriangleVertex3(game_map.geometry_mesh, state.game_state.player.qe_geometry);
 
                 int ax = a->x / TILE_WIDTH * pix_per_tile + offset_x;
                 int ay = debug_window_size_xy - (a->y / TILE_WIDTH * pix_per_tile + offset_y);
@@ -1249,13 +1226,11 @@ int main(int argc, char *argv[])
     SDL_DestroyWindow(debug_window);
 
     // Free our game state
-    // DeconstructDelaunayMesh(state.game_state.geometry_mesh);
     free(game_map.geometry_mesh->quarter_edges);
     free(game_map.geometry_mesh);
 
     // Free our assets
     free(ASSETS_BINARY_BLOB);
-    free(WAD);
     free(ASSETS_BINARY_BLOB2);
 
     return 0;

@@ -5,7 +5,8 @@
 void Tick(
     struct GameState *state,
     f32 dt,
-    const struct KeyBoardState *keyboard_state)
+    const struct KeyBoardState *keyboard_state,
+    const struct GameMap *game_map)
 {
 
     // ------------------------------------------------------------
@@ -50,7 +51,7 @@ void Tick(
     }
 
     // ------------------------------------------------------------
-    // Update the player's velocity
+    // Update the player's velocity and angular speed
     const f32 kPlayerInputAccel = 6.5;
     const f32 kPlayerInputAngularAccel = 8.5;
     const f32 kPlayerMaxSpeed = 5.0;
@@ -161,23 +162,22 @@ void Tick(
 
         if (qe_dual_new_triangle != NULL)
         {
-            // TODO
             // We would have crossed into another triangle.
-            // u16 side_info_index = game_map->quarter_edge_index_to_since_info_index[qe_side->index];
-            // if (side_info_index != 0xFFFF)
-            // {
-            //     // The new triangle is solid, so do not change triangles.
-            //     // Lose all velocity into the boundary surface.
-            //     // This results in the vector along the face.
-            //     state->player.vel = VectorProjection(state->player.vel, v_face);
-            //     state->player.vel.x *= kSlidingFriction;
-            //     state->player.vel.y *= kSlidingFriction;
-            // }
-            // else
-            // {
-            // Accept the new triangle
-            state->player.qe_geometry = qe_dual_new_triangle;
-            // }
+            u16 side_info_index = game_map->quarter_edge_index_to_side_info_index[qe_side->index];
+            if (side_info_index != 0xFFFF)
+            {
+                // The new triangle is solid, so do not change triangles.
+                // Lose all velocity into the boundary surface.
+                // This results in the vector along the face.
+                state->player.vel = VectorProjection(state->player.vel, v_face);
+                state->player.vel.x *= kSlidingFriction;
+                state->player.vel.y *= kSlidingFriction;
+            }
+            else
+            {
+                // Accept the new triangle
+                state->player.qe_geometry = qe_dual_new_triangle;
+            }
         }
     }
 
