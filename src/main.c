@@ -30,24 +30,6 @@ struct BinaryAssetTableOfContentEntry
     char name[ASSET_NAME_BYTE_COUNT];
 };
 
-struct Mapdata
-{
-    u32 n_tiles;
-    u32 n_tiles_x;
-    u32 n_tiles_y;
-    u8 *tiles; // Each tile is either solid (0) or has a texture index (>0)
-    u8 *floor;
-    u8 *ceiling;
-};
-
-static inline u8 GetMapDataIndex(struct Mapdata *mapdata, int x, int y)
-{
-    return (mapdata->n_tiles_y - y - 1) * (mapdata->n_tiles_x) + x;
-}
-
-// The global mapdata. This just points into our asset blob.
-struct Mapdata MAPDATA;
-
 // The bitmap global variables. These just point into the binary blob.
 struct Bitmap BITMAP;
 
@@ -174,7 +156,6 @@ static void LoadAssets(struct GameMap *game_map)
         ASSERT(ASSETS_BINARY_BLOB_SIZE > sizeof(struct BinaryAssetTableOfContentEntry) * n_toc_entries + 4, "Number of table of content entries is impossible given the number of bytes\n");
 
         bool loaded_textures = 0;
-        bool loaded_mapdata = 0;
 
         // Scan through them in reverse order
         for (int i = n_toc_entries; i > 0; i--)
@@ -200,21 +181,6 @@ static void LoadAssets(struct GameMap *game_map)
                 BITMAP.n_pixels_per_row = BITMAP.n_pixels / BITMAP.n_pixels_per_column;
                 loaded_textures = 1;
             }
-            else if (strcmp(entry->name, "mapdata") == 0)
-            {
-                u32 asset_byte_offset = entry->byte_offset;
-                MAPDATA.n_tiles = *(u32 *)(ASSETS_BINARY_BLOB + asset_byte_offset);
-                asset_byte_offset += sizeof(u32);
-                MAPDATA.n_tiles_x = *(u32 *)(ASSETS_BINARY_BLOB + asset_byte_offset);
-                asset_byte_offset += sizeof(u32);
-                MAPDATA.tiles = (u8 *)(ASSETS_BINARY_BLOB + asset_byte_offset);
-                asset_byte_offset += MAPDATA.n_tiles * sizeof(u8);
-                MAPDATA.floor = (u8 *)(ASSETS_BINARY_BLOB + asset_byte_offset);
-                asset_byte_offset += MAPDATA.n_tiles * sizeof(u8);
-                MAPDATA.ceiling = (u8 *)(ASSETS_BINARY_BLOB + asset_byte_offset);
-                MAPDATA.n_tiles_y = MAPDATA.n_tiles / MAPDATA.n_tiles_x;
-                loaded_mapdata = 1;
-            }
             else if (strncmp(entry->name, "SKEL", 4) == 0)
             {
                 int frame_index = entry->name[4] - '0';
@@ -226,7 +192,6 @@ static void LoadAssets(struct GameMap *game_map)
         }
 
         ASSERT(loaded_textures > 0, "Textures not loaded from assets\n");
-        ASSERT(loaded_mapdata > 0, "Map data not loaded from assets\n");
     }
 
     // Load DOOM assets.
@@ -419,18 +384,18 @@ void RenderFloorAndCeiling(
         for (int x = 0; x < SCREEN_SIZE_X; x++)
         {
 
-            int x_ind_hit = (int)(floorf(hit_x / TILE_WIDTH));
-            int y_ind_hit = (int)(floorf(hit_y / TILE_WIDTH));
-            f32 x_rem_hit = hit_x - TILE_WIDTH * x_ind_hit;
-            f32 y_rem_hit = hit_y - TILE_WIDTH * y_ind_hit;
-            x_ind_hit = clamp(x_ind_hit, 0, MAPDATA.n_tiles_x - 1);
-            y_ind_hit = clamp(y_ind_hit, 0, MAPDATA.n_tiles_y - 1);
+            // int x_ind_hit = (int)(floorf(hit_x / TILE_WIDTH));
+            // int y_ind_hit = (int)(floorf(hit_y / TILE_WIDTH));
+            // f32 x_rem_hit = hit_x - TILE_WIDTH * x_ind_hit;
+            // f32 y_rem_hit = hit_y - TILE_WIDTH * y_ind_hit;
+            // x_ind_hit = clamp(x_ind_hit, 0, MAPDATA.n_tiles_x - 1);
+            // y_ind_hit = clamp(y_ind_hit, 0, MAPDATA.n_tiles_y - 1);
 
             u32 texture_x_offset = 0;
-            u32 texture_y_offset = (MAPDATA.floor[GetMapDataIndex(&MAPDATA, x_ind_hit, y_ind_hit)] - 1) * TEXTURE_SIZE;
+            u32 texture_y_offset = 0; // (MAPDATA.floor[GetMapDataIndex(&MAPDATA, x_ind_hit, y_ind_hit)] - 1) * TEXTURE_SIZE;
 
-            u32 texture_x = (int)(x_rem_hit / TILE_WIDTH * TEXTURE_SIZE);
-            u32 texture_y = (int)(y_rem_hit / TILE_WIDTH * TEXTURE_SIZE);
+            u32 texture_x = 0; // (int)(x_rem_hit / TILE_WIDTH * TEXTURE_SIZE);
+            u32 texture_y = 0; // (int)(y_rem_hit / TILE_WIDTH * TEXTURE_SIZE);
 
             u32 color = GetColumnMajorPixelAt(&BITMAP, texture_x + texture_x_offset, texture_y + texture_y_offset);
             pixels[(y * SCREEN_SIZE_X) + x] = color;
@@ -458,18 +423,18 @@ void RenderFloorAndCeiling(
 
         for (int x = 0; x < SCREEN_SIZE_X; x++)
         {
-            int x_ind_hit = (int)(floorf(hit_x / TILE_WIDTH));
-            int y_ind_hit = (int)(floorf(hit_y / TILE_WIDTH));
-            f32 x_rem_hit = hit_x - TILE_WIDTH * x_ind_hit;
-            f32 y_rem_hit = hit_y - TILE_WIDTH * y_ind_hit;
-            x_ind_hit = clamp(x_ind_hit, 0, MAPDATA.n_tiles_x - 1);
-            y_ind_hit = clamp(y_ind_hit, 0, MAPDATA.n_tiles_y - 1);
+            // int x_ind_hit = (int)(floorf(hit_x / TILE_WIDTH));
+            // int y_ind_hit = (int)(floorf(hit_y / TILE_WIDTH));
+            // f32 x_rem_hit = hit_x - TILE_WIDTH * x_ind_hit;
+            // f32 y_rem_hit = hit_y - TILE_WIDTH * y_ind_hit;
+            // x_ind_hit = clamp(x_ind_hit, 0, MAPDATA.n_tiles_x - 1);
+            // y_ind_hit = clamp(y_ind_hit, 0, MAPDATA.n_tiles_y - 1);
 
             u32 texture_x_offset = 0;
-            u32 texture_y_offset = (MAPDATA.ceiling[GetMapDataIndex(&MAPDATA, x_ind_hit, y_ind_hit)] - 1) * TEXTURE_SIZE;
+            u32 texture_y_offset = 0; // (MAPDATA.ceiling[GetMapDataIndex(&MAPDATA, x_ind_hit, y_ind_hit)] - 1) * TEXTURE_SIZE;
 
-            u32 texture_x = (int)(x_rem_hit / TILE_WIDTH * TEXTURE_SIZE);
-            u32 texture_y = (int)(y_rem_hit / TILE_WIDTH * TEXTURE_SIZE);
+            u32 texture_x = 0; // (int)(x_rem_hit / TILE_WIDTH * TEXTURE_SIZE);
+            u32 texture_y = 0; // (int)(y_rem_hit / TILE_WIDTH * TEXTURE_SIZE);
 
             u32 color = GetColumnMajorPixelAt(&BITMAP, texture_x + texture_x_offset, texture_y + texture_y_offset);
             pixels[(y * SCREEN_SIZE_X) + x] = color;
@@ -1097,30 +1062,11 @@ int main(int argc, char *argv[])
 
         {
             SDL_SetRenderDrawColor(debug_renderer, 0x1B, 0xA1, 0xEA, 0xFF);
-            f32 pix_per_tile = debug_window_size_xy / max(MAPDATA.n_tiles_x, MAPDATA.n_tiles_y);
+            f32 pix_per_tile = 49.0;
+            f32 offset_x = 1.5;
+            f32 offset_y = 124.0;
 
-            f32 offset_x = (debug_window_size_xy - pix_per_tile * MAPDATA.n_tiles_x) / 2.0;
-            f32 offset_y = (debug_window_size_xy - pix_per_tile * MAPDATA.n_tiles_y) / 2.0;
-
-            // Render the walls
-            int grid_index = 0;
-            for (int y = 0; y < MAPDATA.n_tiles_y; y++)
-            {
-                for (int x = 0; x < MAPDATA.n_tiles_x; x++)
-                {
-                    if (MAPDATA.tiles[grid_index] > 0)
-                    {
-                        // This tile is a wall
-                        SDL_Rect rect;
-                        rect.x = (int)(pix_per_tile * x + offset_x);
-                        rect.y = (int)(pix_per_tile * y + offset_y);
-                        rect.h = (int)(pix_per_tile);
-                        rect.w = (int)(pix_per_tile);
-                        SDL_RenderFillRect(debug_renderer, &rect);
-                    }
-                    grid_index++;
-                }
-            }
+            // Render the walls TODO
 
             { // Render the camera raycasts
                 SDL_SetRenderDrawColor(debug_renderer, 0xF5, 0x61, 0x5C, 0xFF);
