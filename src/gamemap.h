@@ -40,7 +40,7 @@ struct GameMap
     u16 *quarter_edge_index_to_side_info_index;
 
     u32 n_sectors;
-    struct Sectors *sectors;
+    struct Sector *sectors;
 };
 
 #endif

@@ -502,9 +502,9 @@ void RenderWalls(
             n_steps += 1;
 
             // Grab the enclosing triangle.
-            const QuarterEdge *qe_ab = qe_dual->rot;
-            const QuarterEdge *qe_bc = qe_dual->next->rot;
-            const QuarterEdge *qe_ca = qe_dual->next->next->rot;
+            QuarterEdge *qe_ab = qe_dual->rot;
+            QuarterEdge *qe_bc = qe_dual->next->rot;
+            QuarterEdge *qe_ca = qe_dual->next->next->rot;
 
             const v2 *a = qe_ab->vertex;
             const v2 *b = qe_bc->vertex;
@@ -571,71 +571,57 @@ void RenderWalls(
 
                 u32 side_info_index = game_map->quarter_edge_index_to_side_info_index[qe_side->index];
                 if (side_info_index != 0xFFFF)
-
                 {
+                    struct SideInfo *side_info = game_map->side_infos + side_info_index;
+
                     const f32 ray_len = max(length(sub(pos, camera->pos)), 0.01f);
                     const f32 gamma = cam_len / ray_len * screen_size_y_over_fov_y;
                     wall_raycast_radius[x] = ray_len;
 
-                    f32 z_ceil = 1.0;
-                    f32 z_upper = 0.8;
-                    f32 z_lower = 0.2;
-                    f32 z_floor = 0.0;
+                    struct Sector *sector = game_map->sectors + side_info->sector_id;
+                    f32 z_ceil = sector->z_ceil;
+                    f32 z_upper = sector->z_ceil;
+                    f32 z_lower = sector->z_floor;
+                    f32 z_floor = sector->z_floor;
 
-                    //             const core::Sector *sector = game_map.GetSector(side_info->sector_id);
-                    //             if (sector != nullptr)
-                    //             {
-                    //                 z_ceil = sector->z_ceil;
-                    //                 z_upper = sector->z_ceil;
-                    //                 z_lower = sector->z_floor;
-                    //                 z_floor = sector->z_floor;
-                    //             }
+                    // Get the height on the other side, if it is passable.
+                    const bool is_passable =
+                        ((side_info->flags & SIDEINFO_FLAG_PASSABLE) > 0);
+                    if (is_passable)
+                    {
+                        QuarterEdge *qe_sym = QESym(qe_side);
+                        u32 side_info_index_sym = game_map->quarter_edge_index_to_side_info_index[qe_sym->index];
+                        if (side_info_index_sym != 0xFFFF)
+                        {
+                            struct SideInfo *side_info_sym = game_map->side_infos + side_info_index_sym;
+                            struct Sector *sector_sym = game_map->sectors + side_info_sym->sector_id;
+                            z_lower = sector_sym->z_floor;
+                            z_upper = sector_sym->z_ceil;
+                        }
+                        else
+                        {
+                            printf("Unexpected nullptr qe_sym!\n");
+                        }
+                    }
 
-                    //             // Get the height on the other side, if it is passable.
-                    //             const bool is_passable =
-                    //                 ((side_info->flags & core::kSideInfoFlag_PASSABLE) > 0);
-                    //             if (is_passable)
-                    //             {
-                    //                 core::QuarterEdgeIndex qe_sym = mesh.Sym(qe_side);
-                    //                 const core::SideInfo *side_info_sym = game_map.GetSideInfo(qe_sym);
-                    //                 if (side_info_sym != nullptr)
-                    //                 {
-                    //                     const core::Sector *sector_sym =
-                    //                         game_map.GetSector(side_info_sym->sector_id);
-                    //                     if (sector_sym != nullptr)
-                    //                     {
-                    //                         z_lower = sector_sym->z_floor;
-                    //                         z_upper = sector_sym->z_ceil;
-                    //                     }
-                    //                     else
-                    //                     {
-                    //                         std::cout << "Unexpected nullptr side_info_sym!" << std::endl;
-                    //                     }
-                    //                 }
-                    //                 else
-                    //                 {
-                    //                     std::cout << "Unexpected nullptr qe_sym!" << std::endl;
-                    //                 }
-                    //             }
+                    int y_ceil = (int)(half_screen_size + gamma * (z_ceil - camera->z));
+                    int y_upper = (int)(half_screen_size + gamma * (z_upper - camera->z));
+                    int y_lower = (int)(half_screen_size + gamma * (z_lower - camera->z));
+                    int y_floor = (int)(half_screen_size + gamma * (z_floor - camera->z));
 
-                    //             int y_ceil = (int)(half_screen_size + gamma * (z_ceil - camera.z));
-                    //             int y_upper = (int)(half_screen_size + gamma * (z_upper - camera.z));
-                    //             int y_lower = (int)(half_screen_size + gamma * (z_lower - camera.z));
-                    //             int y_floor = (int)(half_screen_size + gamma * (z_floor - camera.z));
+                    // Calculate where along the segment we intersected.
+                    QuarterEdge *qe_face_src = QETor(qe_dual);
+                    f32 x_along_texture =
+                        length(v_face) - length(sub(pos, *(qe_face_src->vertex)));
+                    u32 texture_x_offset_base =
+                        (side_info->flags & SIDEINFO_FLAG_DARK) > 0 ? TEXTURE_SIZE : 0;
 
-                    //             // Calculate where along the segment we intersected.
-                    //             core::QuarterEdgeIndex qe_face_src = mesh.Tor(qe_dual);
-                    //             f32 x_along_texture =
-                    //                 common::Norm(v_face) - common::Norm(pos - mesh.GetVertex(qe_face_src));
-                    //             u32 texture_x_offset_base =
-                    //                 (side_info->flags & core::kSideInfoFlag_DARK) > 0 ? TEXTURE_SIZE : 0;
-
-                    //             // Render the ceiling above the upper texture
-                    //             while (y_hi > y_ceil)
-                    //             {
-                    //                 y_hi--;
-                    //                 pixels[(y_hi * screen_size_x) + x] = color_ceil;
-                    //             }
+                    // Render the ceiling above the upper texture
+                    while (y_hi > y_ceil)
+                    {
+                        y_hi--;
+                        pixels[(y_hi * SCREEN_SIZE_X) + x] = color_ceil;
+                    }
 
                     //             // Render the upper texture
                     //             if (y_upper < y_hi)
@@ -651,12 +637,12 @@ void RenderWalls(
                     //                 y_hi = y_upper;
                     //             }
 
-                    //             // Render the floor below the lower texture
-                    //             while (y_lo < y_floor)
-                    //             {
-                    //                 y_lo++;
-                    //                 pixels[(y_lo * screen_size_x) + x] = color_floor;
-                    //             }
+                    // Render the floor below the lower texture
+                    while (y_lo < y_floor)
+                    {
+                        y_lo++;
+                        pixels[(y_lo * SCREEN_SIZE_X) + x] = color_floor;
+                    }
 
                     //             // Render the lower texture
                     //             if (y_lower > y_lo)
@@ -676,11 +662,11 @@ void RenderWalls(
                     //                 // }
                     //             }
 
-                    //             // Continue on with our projection if the side is passable.
-                    //             if (is_passable)
-                    //             {
-                    //                 continue;
-                    //             }
+                    // Continue on with our projection if the side is passable.
+                    if (is_passable)
+                    {
+                        continue;
+                    }
 
                     //             // The side info has a solid wall.
                     //             f32 texture_z_height = z_upper - z_lower;
