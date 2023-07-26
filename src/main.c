@@ -9,7 +9,7 @@
 #include "delaunay_mesh.h"
 #include "game.h"
 #include "platform_metrics.h"
-#include "profiler.h"
+// #include "profiler.h"
 
 #define ASSERT(_e, ...)               \
     if (!(_e))                        \
@@ -345,6 +345,15 @@ static void LoadAssets(struct GameMap *game_map)
                            "Side info index %d, which is the %dth index, is out of bounds\n", side_info_index, i);
                 }
             }
+            else if (strcmp(entry->name, "sectors") == 0)
+            {
+                u32 mesh_offset = entry->offset;
+                game_map->n_sectors = *(u32 *)(ASSETS_BINARY_BLOB2 + mesh_offset);
+                mesh_offset += sizeof(u32);
+
+                game_map->sectors = (struct Sector *)(ASSETS_BINARY_BLOB2 + mesh_offset);
+                mesh_offset += game_map->n_side_infos * sizeof(struct Sector);
+            }
         }
 
         fclose(fileptr);
@@ -450,157 +459,245 @@ void RenderFloorAndCeiling(
 void RenderWalls(
     u32 *pixels,
     f32 *wall_raycast_radius,
-    struct CameraState *camera,
-    struct GameMap *game_map,
-    QuarterEdge *qe_camera // dual quarter edge representing the face that the camera is in.
-)
+    const struct CameraState *camera,
+    const struct GameMap *game_map,
+    QuarterEdge *qe_camera)
 {
+    const struct DelaunayMesh *mesh = game_map->geometry_mesh;
+
+    f32 half_screen_size = SCREEN_SIZE_Y / 2.0f;
+    f32 screen_size_y_over_fov_y = SCREEN_SIZE_Y / camera->fov.y;
+
+    u32 color_ceil = 0xFF222222;
+    u32 color_floor = 0xFF444444;
+
     for (int x = 0; x < SCREEN_SIZE_X; x++)
     {
-
         // Camera to pixel column
-        const f32 dw = camera->fov.x / 2 - (camera->fov.x * x) / SCREEN_SIZE_X; // TODO: Precompute once.
-        const v2 cp = {
-            camera->dir.x - dw * camera->dir.y,
-            camera->dir.y + dw * camera->dir.x};
+        const f32 dw =
+            camera->fov.x / 2 - (camera->fov.x * x) / SCREEN_SIZE_X; // TODO: Precompute once.
+        const v2 cp = {camera->dir.x - dw * camera->dir.y,
+                       camera->dir.y + dw * camera->dir.x};
 
         // Distance from the camera to the column
-        const f32 cam_len = length((cp));
+        const f32 cam_len = length(cp);
 
         // Ray direction through this column
         const v2 dir = {cp.x / cam_len, cp.y / cam_len};
 
         // Start at the camera pos
-        QuarterEdge *qe_dual = qe_camera;
         v2 pos = camera->pos;
+        QuarterEdge *qe_dual = qe_camera;
 
         // The edge vector of the face that we last crossed
         v2 v_face = {0.0, 0.0};
 
-        // The side info that we eventually collide with
-        u16 side_info_index = 0xFFFF;
-
         // Step through triangles until we hit a solid triangle
+        int y_hi = SCREEN_SIZE_Y;
+        int y_lo = -1;
+
         int n_steps = 0;
         while (n_steps < 100)
         {
             n_steps += 1;
 
             // Grab the enclosing triangle.
-            QuarterEdge *qe_ab = qe_dual->rot;
-            QuarterEdge *qe_bc = qe_dual->next->rot;
-            QuarterEdge *qe_ca = qe_dual->next->next->rot;
+            const QuarterEdge *qe_ab = qe_dual->rot;
+            const QuarterEdge *qe_bc = qe_dual->next->rot;
+            const QuarterEdge *qe_ca = qe_dual->next->next->rot;
 
-            const v2 a = *(qe_ab->vertex);
-            const v2 b = *(qe_bc->vertex);
-            const v2 c = *(qe_ca->vertex);
+            const v2 *a = qe_ab->vertex;
+            const v2 *b = qe_bc->vertex;
+            const v2 *c = qe_ca->vertex;
 
             // Project our ray out far enough that it would exit our mesh
             f32 projection_distance = 100.0; // Ridiculously large
-            v2 pos_next_delta = {
-                projection_distance * dir.x,
-                projection_distance * dir.y};
-            v2 pos_next = add(pos, pos_next_delta);
+            const v2 pos_next_delta = {projection_distance * dir.x, projection_distance * dir.y};
+            const v2 pos_next = add(pos, pos_next_delta);
 
             f32 min_interp = INFINITY;
             QuarterEdge *qe_side = NULL;
-            QuarterEdge *qe_dual_next = NULL;
 
             // See if we cross any of the 3 faces for the triangle we are in,
-            // And cross the first segment.
-            if (GetRightHandedness(&a, &b, &pos_next) < -1e-4)
+            // and cross the first segment.
+            const f32 eps = 1e-4;
+            if (GetRightHandedness(a, b, &pos_next) < -eps)
             {
                 // We would cross AB
-                v2 v = sub(b, a);
-                v2 w = sub(pos, a);
+                v2 v = sub(*b, *a);
+                v2 w = sub(pos, *a);
                 float interp_ab = cross(v, w) / cross(pos_next_delta, v);
                 if (interp_ab < min_interp)
                 {
                     min_interp = interp_ab;
-                    qe_dual_next = qe_ab->rot;
                     qe_side = qe_ab;
                     v_face = v;
                 }
             }
-            if (GetRightHandedness(&b, &c, &pos_next) < -1e-4)
+            if (GetRightHandedness(b, c, &pos_next) < -eps)
             {
                 // We would cross BC
-                v2 v = sub(c, b);
-                v2 w = sub(pos, b);
+                v2 v = sub(*c, *b);
+                v2 w = sub(pos, *b);
                 float interp_bc = cross(v, w) / cross(pos_next_delta, v);
                 if (interp_bc < min_interp)
                 {
                     min_interp = interp_bc;
-                    qe_dual_next = qe_bc->rot;
                     qe_side = qe_bc;
                     v_face = v;
                 }
             }
-            if (GetRightHandedness(&c, &a, &pos_next) < -1e-4)
+            if (GetRightHandedness(c, a, &pos_next) < -eps)
             {
                 // We would cross CA
-                v2 v = sub(a, c);
-                v2 w = sub(pos, c);
+                v2 v = sub(*a, *c);
+                v2 w = sub(pos, *c);
                 float interp_ca = cross(v, w) / cross(pos_next_delta, v);
                 if (interp_ca < min_interp)
                 {
                     min_interp = interp_ca;
-                    qe_dual_next = qe_ca->rot;
                     qe_side = qe_ca;
                     v_face = v;
                 }
             }
 
-            // Move to the face.
-            if (qe_dual_next != NULL)
+            if (qe_side)
             {
-                // Should always be non-null.
+                // Move to the face
                 pos.x += min_interp * pos_next_delta.x;
                 pos.y += min_interp * pos_next_delta.y;
-                qe_dual = qe_dual_next;
 
-                // TODO - reenable.
-                // Render the ceiling above the threshold.
-                // Calculate the ray length
-                // const f32 ray_len = max(length(sub(pos, camera->pos)), 0.01); // TODO: Remove this `max` once we have proper collision
+                qe_dual = qe_side->rot; // The next face (Should always be non-null)
 
-                // // Calculate the pixel bounds that we fill the wall in for
-                // int y_hi = (int)(SCREEN_SIZE_Y / 2.0f + cam_len * (WALL_HEIGHT - camera->z) / ray_len * SCREEN_SIZE_Y / camera->fov.y);
-                // for (int y = y_hi + 1; y < SCREEN_SIZE_Y; y++)
-                // {
-                //     // Radius
-                //     f32 zpp = (y - (SCREEN_SIZE_Y / 2.0f)) * (camera->fov.y / SCREEN_SIZE_Y);
-                //     f32 radius = (WALL_HEIGHT - camera->z) / zpp; // TODO: Precompute for each y
-
-                //     // Location of the ray's intersection
-                //     f32 hit_x = camera->pos.x + radius * cp.x;
-                //     f32 hit_y = camera->pos.y + radius * cp.y;
-
-                //     int x_ind_hit = (int)(floorf(hit_x / TILE_WIDTH));
-                //     int y_ind_hit = (int)(floorf(hit_y / TILE_WIDTH));
-                //     f32 x_rem_hit = hit_x - TILE_WIDTH * x_ind_hit;
-                //     f32 y_rem_hit = hit_y - TILE_WIDTH * y_ind_hit;
-                //     x_ind_hit = clamp(x_ind_hit, 0, MAPDATA.n_tiles_x - 1);
-                //     y_ind_hit = clamp(y_ind_hit, 0, MAPDATA.n_tiles_y - 1);
-
-                //     // TODO: Get the texture from the triangle data.
-                //     u32 texture_x_offset = 0;
-                //     u32 texture_y_offset = (MAPDATA.ceiling[GetMapDataIndex(&MAPDATA, x_ind_hit, y_ind_hit)] - 1) * TEXTURE_SIZE;
-
-                //     u32 texture_x = (int)(x_rem_hit / TILE_WIDTH * TEXTURE_SIZE);
-                //     u32 texture_y = (int)(y_rem_hit / TILE_WIDTH * TEXTURE_SIZE);
-
-                //     u32 color = GetColumnMajorPixelAt(&BITMAP, texture_x + texture_x_offset, texture_y + texture_y_offset);
-                //     pixels[(y * SCREEN_SIZE_X) + x] = color;
-                // }
-
-                // TODO: Render floor
-
-                side_info_index = game_map->quarter_edge_index_to_side_info_index[qe_side->index];
+                u32 side_info_index = game_map->quarter_edge_index_to_side_info_index[qe_side->index];
                 if (side_info_index != 0xFFFF)
+
                 {
-                    // game_map->side_infos[side_info_index].flags
-                    // The side info is solid.
+                    const f32 ray_len = max(length(sub(pos, camera->pos)), 0.01f);
+                    const f32 gamma = cam_len / ray_len * screen_size_y_over_fov_y;
+                    wall_raycast_radius[x] = ray_len;
+
+                    f32 z_ceil = 1.0;
+                    f32 z_upper = 0.8;
+                    f32 z_lower = 0.2;
+                    f32 z_floor = 0.0;
+
+                    //             const core::Sector *sector = game_map.GetSector(side_info->sector_id);
+                    //             if (sector != nullptr)
+                    //             {
+                    //                 z_ceil = sector->z_ceil;
+                    //                 z_upper = sector->z_ceil;
+                    //                 z_lower = sector->z_floor;
+                    //                 z_floor = sector->z_floor;
+                    //             }
+
+                    //             // Get the height on the other side, if it is passable.
+                    //             const bool is_passable =
+                    //                 ((side_info->flags & core::kSideInfoFlag_PASSABLE) > 0);
+                    //             if (is_passable)
+                    //             {
+                    //                 core::QuarterEdgeIndex qe_sym = mesh.Sym(qe_side);
+                    //                 const core::SideInfo *side_info_sym = game_map.GetSideInfo(qe_sym);
+                    //                 if (side_info_sym != nullptr)
+                    //                 {
+                    //                     const core::Sector *sector_sym =
+                    //                         game_map.GetSector(side_info_sym->sector_id);
+                    //                     if (sector_sym != nullptr)
+                    //                     {
+                    //                         z_lower = sector_sym->z_floor;
+                    //                         z_upper = sector_sym->z_ceil;
+                    //                     }
+                    //                     else
+                    //                     {
+                    //                         std::cout << "Unexpected nullptr side_info_sym!" << std::endl;
+                    //                     }
+                    //                 }
+                    //                 else
+                    //                 {
+                    //                     std::cout << "Unexpected nullptr qe_sym!" << std::endl;
+                    //                 }
+                    //             }
+
+                    //             int y_ceil = (int)(half_screen_size + gamma * (z_ceil - camera.z));
+                    //             int y_upper = (int)(half_screen_size + gamma * (z_upper - camera.z));
+                    //             int y_lower = (int)(half_screen_size + gamma * (z_lower - camera.z));
+                    //             int y_floor = (int)(half_screen_size + gamma * (z_floor - camera.z));
+
+                    //             // Calculate where along the segment we intersected.
+                    //             core::QuarterEdgeIndex qe_face_src = mesh.Tor(qe_dual);
+                    //             f32 x_along_texture =
+                    //                 common::Norm(v_face) - common::Norm(pos - mesh.GetVertex(qe_face_src));
+                    //             u32 texture_x_offset_base =
+                    //                 (side_info->flags & core::kSideInfoFlag_DARK) > 0 ? TEXTURE_SIZE : 0;
+
+                    //             // Render the ceiling above the upper texture
+                    //             while (y_hi > y_ceil)
+                    //             {
+                    //                 y_hi--;
+                    //                 pixels[(y_hi * screen_size_x) + x] = color_ceil;
+                    //             }
+
+                    //             // Render the upper texture
+                    //             if (y_upper < y_hi)
+                    //             {
+                    //                 f32 texture_z_height = z_ceil - z_upper;
+                    //                 u32 texture_y_offset_base =
+                    //                     side_info->texture_info_upper.texture_id * TEXTURE_SIZE;
+                    //                 RenderTextureColumn(
+                    //                     pixels, x, screen_size_x, screen_size_y, y_upper, y_ceil, y_upper, y_hi,
+                    //                     x_along_texture, texture_x_offset_base, texture_y_offset_base,
+                    //                     TEXTURE_SIZE, TEXTURE_SIZE, side_info->texture_info_upper.x_offset,
+                    //                     side_info->texture_info_upper.y_offset, texture_z_height, bitmap);
+                    //                 y_hi = y_upper;
+                    //             }
+
+                    //             // Render the floor below the lower texture
+                    //             while (y_lo < y_floor)
+                    //             {
+                    //                 y_lo++;
+                    //                 pixels[(y_lo * screen_size_x) + x] = color_floor;
+                    //             }
+
+                    //             // Render the lower texture
+                    //             if (y_lower > y_lo)
+                    //             {
+                    //                 f32 texture_z_height = z_lower - z_floor;
+                    //                 u32 texture_y_offset_base =
+                    //                     side_info->texture_info_lower.texture_id * TEXTURE_SIZE;
+                    //                 RenderTextureColumn(
+                    //                     pixels, x, screen_size_x, screen_size_y, y_floor, y_lower, y_lo,
+                    //                     y_lower, x_along_texture, texture_x_offset_base, texture_y_offset_base,
+                    //                     TEXTURE_SIZE, TEXTURE_SIZE, side_info->texture_info_lower.x_offset,
+                    //                     side_info->texture_info_lower.y_offset, texture_z_height, bitmap);
+                    //                 y_lo = y_lower;
+                    //                 // while (y_lo < y_lower) {
+                    //                 //     y_lo++;
+                    //                 //     pixels[(y_lo * screen_size_x) + x] = 0x0000FFFF;
+                    //                 // }
+                    //             }
+
+                    //             // Continue on with our projection if the side is passable.
+                    //             if (is_passable)
+                    //             {
+                    //                 continue;
+                    //             }
+
+                    //             // The side info has a solid wall.
+                    //             f32 texture_z_height = z_upper - z_lower;
+                    //             u32 texture_y_offset_base =
+                    //                 side_info->texture_info_middle.texture_id * TEXTURE_SIZE;
+                    //             RenderTextureColumn(
+                    //                 pixels, x, screen_size_x, screen_size_y, y_lower, y_upper, y_lo, y_hi,
+                    //                 x_along_texture, texture_x_offset_base, texture_y_offset_base, TEXTURE_SIZE,
+                    //                 TEXTURE_SIZE, side_info->texture_info_middle.x_offset,
+                    //                 side_info->texture_info_middle.y_offset, texture_z_height, bitmap);
+
+                    break;
+                }
+
+                // Also break if it is the boundary
+                if (DelaunayMeshIsBoundaryVertex(mesh, qe_side->vertex))
+                {
                     break;
                 }
             }
@@ -609,46 +706,211 @@ void RenderWalls(
                 break;
             }
         }
-
-        // Calculate the ray length
-        const f32 ray_len = max(length(sub(pos, camera->pos)), 0.01); // TODO: Remove this `max` once we have proper collision
-        wall_raycast_radius[x] = ray_len;
-
-        // Calculate the pixel bounds that we fill the wall in for
-        int y_lo = (int)(SCREEN_SIZE_Y / 2.0f - cam_len * camera->z / ray_len * SCREEN_SIZE_Y / camera->fov.y);
-        int y_hi = (int)(SCREEN_SIZE_Y / 2.0f + cam_len * (WALL_HEIGHT - camera->z) / ray_len * SCREEN_SIZE_Y / camera->fov.y);
-        int y_lo_capped = max(y_lo, 0);
-        int y_hi_capped = min(y_hi, SCREEN_SIZE_Y - 1);
-
-        // Texture x offset determines whether we draw the light or dark version
-        QuarterEdge *qe_face_src = qe_dual->rot->rot->rot;
-        u32 texture_x_offset = 0; // ((face_data[qe_face_src->index].flags & FACEDATA_FLAG_DARK) > 0) ? TEXTURE_SIZE : 0;
-        u32 texture_y_offset = 0; // face_data[qe_face_src->index].texture_id * TEXTURE_SIZE;
-        if (side_info_index != 0xFFFF)
-        {
-            struct SideInfo *side_info = game_map->side_infos + side_info_index;
-            texture_x_offset = (side_info->flags & SIDEINFO_FLAG_DARK) > 0 ? TEXTURE_SIZE : 0;
-            texture_y_offset = side_info->texture_id * TEXTURE_SIZE;
-        }
-
-        // Calculate where along the segment we intersected.
-        f32 PIX_PER_DISTANCE = TEXTURE_SIZE / TILE_WIDTH;
-        f32 x_along_texture = length(v_face) - length(sub(pos, *(qe_face_src->vertex)));
-
-        u32 texture_x = (int)(PIX_PER_DISTANCE * x_along_texture) % TEXTURE_SIZE;
-        u32 baseline = GetColumnMajorPixelIndex(&BITMAP, texture_x + texture_x_offset, texture_y_offset);
-        u32 denom = max(1, y_hi - y_lo);
-        f32 y_loc = (f32)((y_hi - y_hi_capped) * TEXTURE_SIZE) / denom;
-        f32 y_step = (f32)(TEXTURE_SIZE) / denom;
-        for (int y = y_hi_capped; y >= y_lo_capped; y--)
-        {
-            u32 texture_y = min((u32)(y_loc), TEXTURE_SIZE - 1);
-            u32 color = BITMAP.abgr[texture_y + baseline];
-            pixels[(y * SCREEN_SIZE_X) + x] = color;
-            y_loc += y_step;
-        }
     }
 }
+
+// void RenderWalls(
+//     u32 *pixels,
+//     f32 *wall_raycast_radius,
+//     struct CameraState *camera,
+//     struct GameMap *game_map,
+//     QuarterEdge *qe_camera // dual quarter edge representing the face that the camera is in.
+// )
+// {
+//     for (int x = 0; x < SCREEN_SIZE_X; x++)
+//     {
+
+//         // Camera to pixel column
+//         const f32 dw = camera->fov.x / 2 - (camera->fov.x * x) / SCREEN_SIZE_X; // TODO: Precompute once.
+//         const v2 cp = {
+//             camera->dir.x - dw * camera->dir.y,
+//             camera->dir.y + dw * camera->dir.x};
+
+//         // Distance from the camera to the column
+//         const f32 cam_len = length((cp));
+
+//         // Ray direction through this column
+//         const v2 dir = {cp.x / cam_len, cp.y / cam_len};
+
+//         // Start at the camera pos
+//         QuarterEdge *qe_dual = qe_camera;
+//         v2 pos = camera->pos;
+
+//         // The edge vector of the face that we last crossed
+//         v2 v_face = {0.0, 0.0};
+
+//         // The side info that we eventually collide with
+//         u16 side_info_index = 0xFFFF;
+
+//         // Step through triangles until we hit a solid triangle
+//         int n_steps = 0;
+//         while (n_steps < 100)
+//         {
+//             n_steps += 1;
+
+//             // Grab the enclosing triangle.
+//             QuarterEdge *qe_ab = qe_dual->rot;
+//             QuarterEdge *qe_bc = qe_dual->next->rot;
+//             QuarterEdge *qe_ca = qe_dual->next->next->rot;
+
+//             const v2 a = *(qe_ab->vertex);
+//             const v2 b = *(qe_bc->vertex);
+//             const v2 c = *(qe_ca->vertex);
+
+//             // Project our ray out far enough that it would exit our mesh
+//             f32 projection_distance = 100.0; // Ridiculously large
+//             v2 pos_next_delta = {
+//                 projection_distance * dir.x,
+//                 projection_distance * dir.y};
+//             v2 pos_next = add(pos, pos_next_delta);
+
+//             f32 min_interp = INFINITY;
+//             QuarterEdge *qe_side = NULL;
+//             QuarterEdge *qe_dual_next = NULL;
+
+//             // See if we cross any of the 3 faces for the triangle we are in,
+//             // And cross the first segment.
+//             if (GetRightHandedness(&a, &b, &pos_next) < -1e-4)
+//             {
+//                 // We would cross AB
+//                 v2 v = sub(b, a);
+//                 v2 w = sub(pos, a);
+//                 float interp_ab = cross(v, w) / cross(pos_next_delta, v);
+//                 if (interp_ab < min_interp)
+//                 {
+//                     min_interp = interp_ab;
+//                     qe_dual_next = qe_ab->rot;
+//                     qe_side = qe_ab;
+//                     v_face = v;
+//                 }
+//             }
+//             if (GetRightHandedness(&b, &c, &pos_next) < -1e-4)
+//             {
+//                 // We would cross BC
+//                 v2 v = sub(c, b);
+//                 v2 w = sub(pos, b);
+//                 float interp_bc = cross(v, w) / cross(pos_next_delta, v);
+//                 if (interp_bc < min_interp)
+//                 {
+//                     min_interp = interp_bc;
+//                     qe_dual_next = qe_bc->rot;
+//                     qe_side = qe_bc;
+//                     v_face = v;
+//                 }
+//             }
+//             if (GetRightHandedness(&c, &a, &pos_next) < -1e-4)
+//             {
+//                 // We would cross CA
+//                 v2 v = sub(a, c);
+//                 v2 w = sub(pos, c);
+//                 float interp_ca = cross(v, w) / cross(pos_next_delta, v);
+//                 if (interp_ca < min_interp)
+//                 {
+//                     min_interp = interp_ca;
+//                     qe_dual_next = qe_ca->rot;
+//                     qe_side = qe_ca;
+//                     v_face = v;
+//                 }
+//             }
+
+//             // Move to the face.
+//             if (qe_dual_next != NULL)
+//             {
+//                 // Should always be non-null.
+//                 pos.x += min_interp * pos_next_delta.x;
+//                 pos.y += min_interp * pos_next_delta.y;
+//                 qe_dual = qe_dual_next;
+
+//                 // TODO - reenable.
+//                 // Render the ceiling above the threshold.
+//                 // Calculate the ray length
+//                 // const f32 ray_len = max(length(sub(pos, camera->pos)), 0.01); // TODO: Remove this `max` once we have proper collision
+
+//                 // // Calculate the pixel bounds that we fill the wall in for
+//                 // int y_hi = (int)(SCREEN_SIZE_Y / 2.0f + cam_len * (WALL_HEIGHT - camera->z) / ray_len * SCREEN_SIZE_Y / camera->fov.y);
+//                 // for (int y = y_hi + 1; y < SCREEN_SIZE_Y; y++)
+//                 // {
+//                 //     // Radius
+//                 //     f32 zpp = (y - (SCREEN_SIZE_Y / 2.0f)) * (camera->fov.y / SCREEN_SIZE_Y);
+//                 //     f32 radius = (WALL_HEIGHT - camera->z) / zpp; // TODO: Precompute for each y
+
+//                 //     // Location of the ray's intersection
+//                 //     f32 hit_x = camera->pos.x + radius * cp.x;
+//                 //     f32 hit_y = camera->pos.y + radius * cp.y;
+
+//                 //     int x_ind_hit = (int)(floorf(hit_x / TILE_WIDTH));
+//                 //     int y_ind_hit = (int)(floorf(hit_y / TILE_WIDTH));
+//                 //     f32 x_rem_hit = hit_x - TILE_WIDTH * x_ind_hit;
+//                 //     f32 y_rem_hit = hit_y - TILE_WIDTH * y_ind_hit;
+//                 //     x_ind_hit = clamp(x_ind_hit, 0, MAPDATA.n_tiles_x - 1);
+//                 //     y_ind_hit = clamp(y_ind_hit, 0, MAPDATA.n_tiles_y - 1);
+
+//                 //     // TODO: Get the texture from the triangle data.
+//                 //     u32 texture_x_offset = 0;
+//                 //     u32 texture_y_offset = (MAPDATA.ceiling[GetMapDataIndex(&MAPDATA, x_ind_hit, y_ind_hit)] - 1) * TEXTURE_SIZE;
+
+//                 //     u32 texture_x = (int)(x_rem_hit / TILE_WIDTH * TEXTURE_SIZE);
+//                 //     u32 texture_y = (int)(y_rem_hit / TILE_WIDTH * TEXTURE_SIZE);
+
+//                 //     u32 color = GetColumnMajorPixelAt(&BITMAP, texture_x + texture_x_offset, texture_y + texture_y_offset);
+//                 //     pixels[(y * SCREEN_SIZE_X) + x] = color;
+//                 // }
+
+//                 // TODO: Render floor
+
+//                 side_info_index = game_map->quarter_edge_index_to_side_info_index[qe_side->index];
+//                 if (side_info_index != 0xFFFF)
+//                 {
+//                     // game_map->side_infos[side_info_index].flags
+//                     // The side info is solid.
+//                     break;
+//                 }
+//             }
+//             else
+//             {
+//                 break;
+//             }
+//         }
+
+//         // Calculate the ray length
+//         const f32 ray_len = max(length(sub(pos, camera->pos)), 0.01); // TODO: Remove this `max` once we have proper collision
+//         wall_raycast_radius[x] = ray_len;
+
+//         // Calculate the pixel bounds that we fill the wall in for
+//         int y_lo = (int)(SCREEN_SIZE_Y / 2.0f - cam_len * camera->z / ray_len * SCREEN_SIZE_Y / camera->fov.y);
+//         int y_hi = (int)(SCREEN_SIZE_Y / 2.0f + cam_len * (WALL_HEIGHT - camera->z) / ray_len * SCREEN_SIZE_Y / camera->fov.y);
+//         int y_lo_capped = max(y_lo, 0);
+//         int y_hi_capped = min(y_hi, SCREEN_SIZE_Y - 1);
+
+//         // Texture x offset determines whether we draw the light or dark version
+//         QuarterEdge *qe_face_src = qe_dual->rot->rot->rot;
+//         u32 texture_x_offset = 0; // ((face_data[qe_face_src->index].flags & FACEDATA_FLAG_DARK) > 0) ? TEXTURE_SIZE : 0;
+//         u32 texture_y_offset = 0; // face_data[qe_face_src->index].texture_id * TEXTURE_SIZE;
+//         if (side_info_index != 0xFFFF)
+//         {
+//             struct SideInfo *side_info = game_map->side_infos + side_info_index;
+//             texture_x_offset = (side_info->flags & SIDEINFO_FLAG_DARK) > 0 ? TEXTURE_SIZE : 0;
+//             texture_y_offset = side_info->texture_id * TEXTURE_SIZE;
+//         }
+
+//         // Calculate where along the segment we intersected.
+//         f32 PIX_PER_DISTANCE = TEXTURE_SIZE / TILE_WIDTH;
+//         f32 x_along_texture = length(v_face) - length(sub(pos, *(qe_face_src->vertex)));
+
+//         u32 texture_x = (int)(PIX_PER_DISTANCE * x_along_texture) % TEXTURE_SIZE;
+//         u32 baseline = GetColumnMajorPixelIndex(&BITMAP, texture_x + texture_x_offset, texture_y_offset);
+//         u32 denom = max(1, y_hi - y_lo);
+//         f32 y_loc = (f32)((y_hi - y_hi_capped) * TEXTURE_SIZE) / denom;
+//         f32 y_step = (f32)(TEXTURE_SIZE) / denom;
+//         for (int y = y_hi_capped; y >= y_lo_capped; y--)
+//         {
+//             u32 texture_y = min((u32)(y_loc), TEXTURE_SIZE - 1);
+//             u32 color = BITMAP.abgr[texture_y + baseline];
+//             pixels[(y * SCREEN_SIZE_X) + x] = color;
+//             y_loc += y_step;
+//         }
+//     }
+// }
 
 void RenderObjects(
     u32 *pixels,
@@ -757,7 +1019,7 @@ void Render(
 )
 {
     u64 rtdsc_render_start = ReadCPUTimer();
-    RenderFloorAndCeiling(pixels, camera);
+    // RenderFloorAndCeiling(pixels, camera);
     u64 rtdsc_post_floor_and_ceiling = ReadCPUTimer();
     RenderWalls(pixels, wall_raycast_radius, camera, game_map, qe_camera);
     u64 rtdsc_post_walls = ReadCPUTimer();
