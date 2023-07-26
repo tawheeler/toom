@@ -9,6 +9,7 @@
 #include "delaunay_mesh.h"
 #include "game.h"
 #include "platform_metrics.h"
+#include "profiler.h"
 
 #define ASSERT(_e, ...)               \
     if (!(_e))                        \
@@ -433,8 +434,8 @@ void RenderFloorAndCeiling(
             u32 texture_x_offset = 0;
             u32 texture_y_offset = 0; // (MAPDATA.ceiling[GetMapDataIndex(&MAPDATA, x_ind_hit, y_ind_hit)] - 1) * TEXTURE_SIZE;
 
-            u32 texture_x = 0; // (int)(x_rem_hit / TILE_WIDTH * TEXTURE_SIZE);
-            u32 texture_y = 0; // (int)(y_rem_hit / TILE_WIDTH * TEXTURE_SIZE);
+            u32 texture_x = 5; // (int)(x_rem_hit / TILE_WIDTH * TEXTURE_SIZE);
+            u32 texture_y = 5; // (int)(y_rem_hit / TILE_WIDTH * TEXTURE_SIZE);
 
             u32 color = GetColumnMajorPixelAt(&BITMAP, texture_x + texture_x_offset, texture_y + texture_y_offset);
             pixels[(y * SCREEN_SIZE_X) + x] = color;
