@@ -9,11 +9,12 @@
 
 struct PlayerState
 {
-    v2 pos;    // location in game coordinate frame
-    v2 dir;    // unit direction that the camera is facing
-    v2 vel;    // linear rate of change
-    f32 omega; // angular rate of change [rad/s]
-    f32 z;     // height over the ground
+    v2 pos;     // location in game coordinate frame
+    v2 dir;     // unit direction that the camera is facing
+    v2 vel;     // linear rate of change
+    f32 omega;  // angular rate of change [rad/s]
+    f32 height; // height over the ground
+    f32 z;      // absolute z position of the player view
 
     // A pointer to the (dual) quarter edge in the geometry mesh containing the player
     QuarterEdge *qe_geometry;

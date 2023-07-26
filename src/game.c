@@ -163,8 +163,31 @@ void Tick(
         if (qe_dual_new_triangle != NULL)
         {
             // We would have crossed into another triangle.
+
+            // Determine whether to continue on or stop at the edge.
+            bool stop_at_edge = 0;
+            f32 sector_z = 0.0f;
             u16 side_info_index = game_map->quarter_edge_index_to_side_info_index[qe_side->index];
             if (side_info_index != 0xFFFF)
+            {
+
+                // TODO: Prevent proceeding if the z-difference is sufficiently large
+                struct SideInfo *side_info = game_map->side_infos + side_info_index;
+                const bool is_passable =
+                    ((side_info->flags & SIDEINFO_FLAG_PASSABLE) > 0);
+                stop_at_edge = !is_passable;
+
+                QuarterEdge *qe_sym = QESym(qe_side);
+                u32 side_info_index_sym = game_map->quarter_edge_index_to_side_info_index[qe_sym->index];
+                if (side_info_index_sym != 0xFFFF)
+                {
+                    struct SideInfo *side_info_sym = game_map->side_infos + side_info_index_sym;
+                    struct Sector *sector_sym = game_map->sectors + side_info_sym->sector_id;
+                    sector_z = sector_sym->z_floor;
+                }
+            }
+
+            if (stop_at_edge)
             {
                 // The new triangle is solid, so do not change triangles.
                 // Lose all velocity into the boundary surface.
@@ -177,6 +200,7 @@ void Tick(
             {
                 // Accept the new triangle
                 state->player.qe_geometry = qe_dual_new_triangle;
+                state->player.z = sector_z + state->player.height;
             }
         }
     }

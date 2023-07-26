@@ -360,6 +360,47 @@ static void LoadAssets(struct GameMap *game_map)
     }
 }
 
+void RenderTextureColumn(u32 *pixels, int x, int screen_size_x, int screen_size_y, int y_lower,
+                         int y_upper, int y_lo, int y_hi, f32 x_along_texture,
+                         u32 texture_x_offset_base, u32 texture_y_offset_base, u32 texture_size_x,
+                         u32 texture_size_y, u32 x_base_offset, u32 y_base_offset,
+                         f32 texture_z_height, struct Bitmap *bitmap)
+{
+    f32 PIX_PER_DISTANCE = texture_size_x / TILE_WIDTH;
+
+    u32 texture_x = ((int)(PIX_PER_DISTANCE * x_along_texture) + x_base_offset) % texture_size_x +
+                    texture_x_offset_base;
+    u32 baseline = GetColumnMajorPixelIndex(bitmap, texture_x, texture_y_offset_base);
+
+    // y_lower = screen y coordinate of bottom of column (can exceed screen bounds)
+    // y_upper = screen y coordinate of top of column (can exceed screen bounds)
+    // y_lo    = screen y coordinate where we end drawing (does not exceed screen bounds)
+    // y_hi    = screen y coordinate where we start drawing (does not exceed screen bounds)
+    // texture_z_height = real-world height of the painting surface
+
+    // y_step is the number of (continuous) texture pixels y changes per screen pixel
+    f32 m = (f32)(texture_size_y * texture_z_height - 1) / (y_lower - y_upper);
+    f32 b = -m * y_upper;
+    f32 y_step = m * 1.0f;
+
+    // The (continuous) texture y pixel we are at at the top of the rendered image
+    f32 y_loc = m * (2 * y_upper - y_hi) + b;
+
+    for (int y = y_hi - 1; y > y_lo; y--)
+    {
+        // u32 texture_y = std::min((u32)(y_loc), texture_size_y - 1);
+        u32 texture_y = ((int)(y_loc) + y_base_offset) % texture_size_y;
+
+        u32 color = bitmap->abgr[texture_y + baseline];
+        if ((y * screen_size_x) + x >= 360 * 720)
+        {
+            printf("bad!");
+        }
+        pixels[(y * screen_size_x) + x] = color;
+        y_loc += y_step;
+    }
+}
+
 void RenderFloorAndCeiling(
     u32 *pixels,
     struct CameraState *camera)
@@ -623,19 +664,19 @@ void RenderWalls(
                         pixels[(y_hi * SCREEN_SIZE_X) + x] = color_ceil;
                     }
 
-                    //             // Render the upper texture
-                    //             if (y_upper < y_hi)
-                    //             {
-                    //                 f32 texture_z_height = z_ceil - z_upper;
-                    //                 u32 texture_y_offset_base =
-                    //                     side_info->texture_info_upper.texture_id * TEXTURE_SIZE;
-                    //                 RenderTextureColumn(
-                    //                     pixels, x, screen_size_x, screen_size_y, y_upper, y_ceil, y_upper, y_hi,
-                    //                     x_along_texture, texture_x_offset_base, texture_y_offset_base,
-                    //                     TEXTURE_SIZE, TEXTURE_SIZE, side_info->texture_info_upper.x_offset,
-                    //                     side_info->texture_info_upper.y_offset, texture_z_height, bitmap);
-                    //                 y_hi = y_upper;
-                    //             }
+                    // Render the upper texture
+                    if (y_upper < y_hi)
+                    {
+                        f32 texture_z_height = z_ceil - z_upper;
+                        u32 texture_y_offset_base =
+                            side_info->texture_info_upper.texture_id * TEXTURE_SIZE;
+                        RenderTextureColumn(
+                            pixels, x, SCREEN_SIZE_X, SCREEN_SIZE_Y, y_upper, y_ceil, y_upper, y_hi,
+                            x_along_texture, texture_x_offset_base, texture_y_offset_base,
+                            TEXTURE_SIZE, TEXTURE_SIZE, side_info->texture_info_upper.x_offset,
+                            side_info->texture_info_upper.y_offset, texture_z_height, &BITMAP);
+                        y_hi = y_upper;
+                    }
 
                     // Render the floor below the lower texture
                     while (y_lo < y_floor)
@@ -644,23 +685,19 @@ void RenderWalls(
                         pixels[(y_lo * SCREEN_SIZE_X) + x] = color_floor;
                     }
 
-                    //             // Render the lower texture
-                    //             if (y_lower > y_lo)
-                    //             {
-                    //                 f32 texture_z_height = z_lower - z_floor;
-                    //                 u32 texture_y_offset_base =
-                    //                     side_info->texture_info_lower.texture_id * TEXTURE_SIZE;
-                    //                 RenderTextureColumn(
-                    //                     pixels, x, screen_size_x, screen_size_y, y_floor, y_lower, y_lo,
-                    //                     y_lower, x_along_texture, texture_x_offset_base, texture_y_offset_base,
-                    //                     TEXTURE_SIZE, TEXTURE_SIZE, side_info->texture_info_lower.x_offset,
-                    //                     side_info->texture_info_lower.y_offset, texture_z_height, bitmap);
-                    //                 y_lo = y_lower;
-                    //                 // while (y_lo < y_lower) {
-                    //                 //     y_lo++;
-                    //                 //     pixels[(y_lo * screen_size_x) + x] = 0x0000FFFF;
-                    //                 // }
-                    //             }
+                    // Render the lower texture
+                    if (y_lower > y_lo)
+                    {
+                        f32 texture_z_height = z_lower - z_floor;
+                        u32 texture_y_offset_base =
+                            side_info->texture_info_lower.texture_id * TEXTURE_SIZE;
+                        RenderTextureColumn(
+                            pixels, x, SCREEN_SIZE_X, SCREEN_SIZE_Y, y_floor, y_lower, y_lo,
+                            y_lower, x_along_texture, texture_x_offset_base, texture_y_offset_base,
+                            TEXTURE_SIZE, TEXTURE_SIZE, side_info->texture_info_lower.x_offset,
+                            side_info->texture_info_lower.y_offset, texture_z_height, &BITMAP);
+                        y_lo = y_lower;
+                    }
 
                     // Continue on with our projection if the side is passable.
                     if (is_passable)
@@ -668,15 +705,15 @@ void RenderWalls(
                         continue;
                     }
 
-                    //             // The side info has a solid wall.
-                    //             f32 texture_z_height = z_upper - z_lower;
-                    //             u32 texture_y_offset_base =
-                    //                 side_info->texture_info_middle.texture_id * TEXTURE_SIZE;
-                    //             RenderTextureColumn(
-                    //                 pixels, x, screen_size_x, screen_size_y, y_lower, y_upper, y_lo, y_hi,
-                    //                 x_along_texture, texture_x_offset_base, texture_y_offset_base, TEXTURE_SIZE,
-                    //                 TEXTURE_SIZE, side_info->texture_info_middle.x_offset,
-                    //                 side_info->texture_info_middle.y_offset, texture_z_height, bitmap);
+                    // The side info has a solid wall.
+                    f32 texture_z_height = z_upper - z_lower;
+                    u32 texture_y_offset_base =
+                        side_info->texture_info_middle.texture_id * TEXTURE_SIZE;
+                    RenderTextureColumn(
+                        pixels, x, SCREEN_SIZE_X, SCREEN_SIZE_Y, y_lower, y_upper, y_lo, y_hi,
+                        x_along_texture, texture_x_offset_base, texture_y_offset_base, TEXTURE_SIZE,
+                        TEXTURE_SIZE, side_info->texture_info_middle.x_offset,
+                        side_info->texture_info_middle.y_offset, texture_z_height, &BITMAP);
 
                     break;
                 }
@@ -1090,6 +1127,7 @@ int main(int argc, char *argv[])
     state.game_state.player.dir = (v2){0.0, 0.0};
     state.game_state.player.vel = (v2){0.0, 0.0};
     state.game_state.player.omega = 0.0f;
+    state.game_state.player.height = 0.4;
     state.game_state.player.z = 0.4;
     state.game_state.player.qe_geometry = DelaunayMeshGetEnclosingTriangle2(game_map.geometry_mesh, &(state.game_state.player.pos));
 
