@@ -47,16 +47,6 @@ struct CameraState
 // ------------------------------------------------------------------------------
 // DOOM Assets
 
-// u8 *WAD = NULL;
-// u32 WAD_SIZE = 0; // number of bytes
-
-// struct WadDirectoryEntry
-// {
-//     u32 byte_offset;
-//     u32 size;
-//     char name[8];
-// };
-
 //  Each palette in the PLAYPAL lump contains 256 colors totaling 768 bytes,
 //  where each color is broken into three unsigned bytes. Each of these color components (red, green, and blue) range between 0 and 255.
 u32 PALETTE_OFFSET = 0;
@@ -194,56 +184,6 @@ static void LoadAssets(struct GameMap *game_map)
 
         ASSERT(loaded_textures > 0, "Textures not loaded from assets\n");
     }
-
-    // Load DOOM assets.
-    // if (WAD)
-    // {
-    //     free(WAD);
-    // }
-    // {
-    //     FILE *fileptr = fopen("assets/DOOM.WAD", "rb");
-    //     ASSERT(fileptr, "Error opening DOOM WAD\n");
-
-    //     // Count the number of bytes
-    //     fseek(fileptr, 0, SEEK_END);
-    //     WAD_SIZE = ftell(fileptr);
-
-    //     // Read in the WAD file
-    //     fseek(fileptr, 0, SEEK_SET);
-    //     WAD = (u8 *)malloc(WAD_SIZE);
-    //     ASSERT(WAD, "Failed to allocate DOOM WAD\n");
-    //     ASSERT(fread(WAD, sizeof(u8), WAD_SIZE, fileptr) == WAD_SIZE, "Failed to read DOOM WAD\n");
-
-    //     u32 n_lumps = *(u32 *)(WAD + 0x04);
-    //     u32 dir_loc = *(u32 *)(WAD + 0x08);
-
-    //     // Process the directory
-    //     bool loaded_patch = 0;
-    //     u32 byte_index = dir_loc;
-    //     for (u32 directory_index = 0; directory_index < n_lumps; directory_index++)
-    //     {
-    //         struct WadDirectoryEntry *entry = (struct WadDirectoryEntry *)(WAD + byte_index);
-    //         // printf("Entry %d: %.8s at offset %d with size %d\n", directory_index, entry->name, entry->byte_offset, entry->size);
-    //         byte_index += sizeof(struct WadDirectoryEntry);
-
-    //         // if (strcmp(entry->name, "PLAYPAL") == 0)
-    //         // {
-    //         //     PALETTE_OFFSET = entry->byte_offset;
-    //         // }
-    //         // else
-    //         if (strncmp(entry->name, "CYBRE", 5) == 0)
-    //         {
-    //             int frame_index = entry->name[5] - '1';
-    //             CYBR_PATCH_ENTRIES[frame_index].byte_offset = entry->byte_offset;
-    //             CYBR_PATCH_ENTRIES[frame_index].patch = (struct Patch *)(WAD + entry->byte_offset);
-    //             loaded_patch = 1;
-    //         }
-    //     }
-
-    //     fclose(fileptr);
-
-    //     ASSERT(loaded_patch > 0, "Patch not loaded from assets\n");
-    // }
 
     // Load assets #2
     if (ASSETS_BINARY_BLOB2)
