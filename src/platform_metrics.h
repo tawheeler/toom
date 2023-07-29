@@ -1,6 +1,8 @@
 #ifndef PLATFORM_METRICS_C_INCLUDED
 #define PLATFORM_METRICS_C_INCLUDED
 
+// This platform metrics file is based on the performance aware programming series by Casey Muratori.
+
 #include "typedefs.h"
 
 #include <x86intrin.h>
