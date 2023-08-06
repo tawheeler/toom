@@ -5,7 +5,6 @@
 #include "constants.h"
 #include "vec.h"
 #include "input.h"
-#include "bitmap.h"
 #include "delaunay_mesh.h"
 #include "game.h"
 #include "platform_metrics.h"
@@ -30,9 +29,6 @@ struct BinaryAssetTableOfContentEntry
     u32 byte_offset;
     char name[ASSET_NAME_BYTE_COUNT];
 };
-
-// The bitmap global variables. These just point into the binary blob.
-struct Bitmap BITMAP;
 
 // ------------------------------------------------------------------------------
 
@@ -157,21 +153,6 @@ static void LoadAssets(struct GameMap *game_map)
             entry->name[15] = '\0';
             printf("Entry %d: %s at offset %d\n", i, entry->name, entry->byte_offset);
 
-            // In the future, load them into a map or something. For now, we're specifically looking for either the wall or floor textures.
-            // if (strcmp(entry->name, "textures") == 0)
-            // {
-            //     u32 asset_byte_offset = entry->byte_offset;
-            //     BITMAP.n_pixels = *(u32 *)(ASSETS_BINARY_BLOB + asset_byte_offset);
-            //     asset_byte_offset += sizeof(u32);
-            //     BITMAP.n_pixels_per_column = *(u32 *)(ASSETS_BINARY_BLOB + asset_byte_offset);
-            //     asset_byte_offset += sizeof(u32);
-            //     BITMAP.column_major = ASSETS_BINARY_BLOB[asset_byte_offset];
-            //     ASSERT(BITMAP.column_major, "Expected the wall texture to be column-major\n");
-            //     asset_byte_offset += sizeof(u8);
-            //     BITMAP.abgr = (u32 *)(ASSETS_BINARY_BLOB + asset_byte_offset);
-            //     BITMAP.n_pixels_per_row = BITMAP.n_pixels / BITMAP.n_pixels_per_column;
-            //     loaded_textures = 1;
-            // } else
             if (strncmp(entry->name, "SKEL", 4) == 0)
             {
                 int frame_index = entry->name[4] - '0';
@@ -229,7 +210,7 @@ static void LoadAssets(struct GameMap *game_map)
             {
                 u32 offset = entry->offset;
 
-                u32 n_palettes = *(u32 *)(ASSETS_BINARY_BLOB2 + offset);
+                // u32 n_palettes = *(u32 *)(ASSETS_BINARY_BLOB2 + offset);
                 offset += sizeof(u32);
 
                 // TODO: Import other palettes.
@@ -437,101 +418,101 @@ void RenderPatchColumn(u32 *pixels, int x_screen, int y_lower,
     }
 }
 
-void RenderFloorAndCeiling(
-    u32 *pixels,
-    struct CameraState *camera)
-{
-    // Ray direction for x = 0
-    f32 half_camera_width = camera->fov.x / 2.0f;
-    f32 ray_dir_lo_x = camera->dir.x - half_camera_width * camera->dir.y;
-    f32 ray_dir_lo_y = camera->dir.y + half_camera_width * camera->dir.x;
+// void RenderFloorAndCeiling(
+//     u32 *pixels,
+//     struct CameraState *camera)
+// {
+//     // Ray direction for x = 0
+//     f32 half_camera_width = camera->fov.x / 2.0f;
+//     f32 ray_dir_lo_x = camera->dir.x - half_camera_width * camera->dir.y;
+//     f32 ray_dir_lo_y = camera->dir.y + half_camera_width * camera->dir.x;
 
-    // Ray direction for x = SCREEN_SIZE_X
-    f32 ray_dir_hi_x = camera->dir.x + half_camera_width * camera->dir.y;
-    f32 ray_dir_hi_y = camera->dir.y - half_camera_width * camera->dir.x;
+//     // Ray direction for x = SCREEN_SIZE_X
+//     f32 ray_dir_hi_x = camera->dir.x + half_camera_width * camera->dir.y;
+//     f32 ray_dir_hi_y = camera->dir.y - half_camera_width * camera->dir.x;
 
-    // Draw floor
-    for (int y = 0; y < SCREEN_SIZE_Y / 2; y++)
-    {
-        // Radius
-        f32 zpp = (SCREEN_SIZE_Y / 2.0f - y) * (camera->fov.y / SCREEN_SIZE_Y);
-        f32 radius = camera->z / zpp; // TODO: Precompute for each y
+//     // Draw floor
+//     for (int y = 0; y < SCREEN_SIZE_Y / 2; y++)
+//     {
+//         // Radius
+//         f32 zpp = (SCREEN_SIZE_Y / 2.0f - y) * (camera->fov.y / SCREEN_SIZE_Y);
+//         f32 radius = camera->z / zpp; // TODO: Precompute for each y
 
-        // Location of the 1st ray's intersection
-        f32 hit_x = camera->pos.x + radius * ray_dir_lo_x;
-        f32 hit_y = camera->pos.y + radius * ray_dir_lo_y;
+//         // Location of the 1st ray's intersection
+//         f32 hit_x = camera->pos.x + radius * ray_dir_lo_x;
+//         f32 hit_y = camera->pos.y + radius * ray_dir_lo_y;
 
-        // Each step is (hit_x2 - hit_x) / SCREEN_SIZE_X;
-        // = ((camera->pos.x + radius * ray_dir_lo_x) - (camera->pos.x + radius * ray_dir_lo_x)) / SCREEN_SIZE_X
-        // = (radius * ray_dir_lo_x - (radius * ray_dir_lo_x)) / SCREEN_SIZE_X
-        // = radius * (ray_dir_hi_x - ray_dir_lo_x) / SCREEN_SIZE_X
-        f32 step_x = radius * (ray_dir_hi_x - ray_dir_lo_x) / SCREEN_SIZE_X;
-        f32 step_y = radius * (ray_dir_hi_y - ray_dir_lo_y) / SCREEN_SIZE_X;
+//         // Each step is (hit_x2 - hit_x) / SCREEN_SIZE_X;
+//         // = ((camera->pos.x + radius * ray_dir_lo_x) - (camera->pos.x + radius * ray_dir_lo_x)) / SCREEN_SIZE_X
+//         // = (radius * ray_dir_lo_x - (radius * ray_dir_lo_x)) / SCREEN_SIZE_X
+//         // = radius * (ray_dir_hi_x - ray_dir_lo_x) / SCREEN_SIZE_X
+//         f32 step_x = radius * (ray_dir_hi_x - ray_dir_lo_x) / SCREEN_SIZE_X;
+//         f32 step_y = radius * (ray_dir_hi_y - ray_dir_lo_y) / SCREEN_SIZE_X;
 
-        for (int x = 0; x < SCREEN_SIZE_X; x++)
-        {
+//         for (int x = 0; x < SCREEN_SIZE_X; x++)
+//         {
 
-            // int x_ind_hit = (int)(floorf(hit_x / TILE_WIDTH));
-            // int y_ind_hit = (int)(floorf(hit_y / TILE_WIDTH));
-            // f32 x_rem_hit = hit_x - TILE_WIDTH * x_ind_hit;
-            // f32 y_rem_hit = hit_y - TILE_WIDTH * y_ind_hit;
-            // x_ind_hit = clamp(x_ind_hit, 0, MAPDATA.n_tiles_x - 1);
-            // y_ind_hit = clamp(y_ind_hit, 0, MAPDATA.n_tiles_y - 1);
+//             // int x_ind_hit = (int)(floorf(hit_x / TILE_WIDTH));
+//             // int y_ind_hit = (int)(floorf(hit_y / TILE_WIDTH));
+//             // f32 x_rem_hit = hit_x - TILE_WIDTH * x_ind_hit;
+//             // f32 y_rem_hit = hit_y - TILE_WIDTH * y_ind_hit;
+//             // x_ind_hit = clamp(x_ind_hit, 0, MAPDATA.n_tiles_x - 1);
+//             // y_ind_hit = clamp(y_ind_hit, 0, MAPDATA.n_tiles_y - 1);
 
-            u32 texture_x_offset = 0;
-            u32 texture_y_offset = 0; // (MAPDATA.floor[GetMapDataIndex(&MAPDATA, x_ind_hit, y_ind_hit)] - 1) * TEXTURE_SIZE;
+//             u32 texture_x_offset = 0;
+//             u32 texture_y_offset = 0; // (MAPDATA.floor[GetMapDataIndex(&MAPDATA, x_ind_hit, y_ind_hit)] - 1) * TEXTURE_SIZE;
 
-            u32 texture_x = 0; // (int)(x_rem_hit / TILE_WIDTH * TEXTURE_SIZE);
-            u32 texture_y = 0; // (int)(y_rem_hit / TILE_WIDTH * TEXTURE_SIZE);
+//             u32 texture_x = 0; // (int)(x_rem_hit / TILE_WIDTH * TEXTURE_SIZE);
+//             u32 texture_y = 0; // (int)(y_rem_hit / TILE_WIDTH * TEXTURE_SIZE);
 
-            u32 color = GetColumnMajorPixelAt(&BITMAP, texture_x + texture_x_offset, texture_y + texture_y_offset);
-            pixels[(y * SCREEN_SIZE_X) + x] = color;
+//             u32 color = GetColumnMajorPixelAt(&BITMAP, texture_x + texture_x_offset, texture_y + texture_y_offset);
+//             pixels[(y * SCREEN_SIZE_X) + x] = color;
 
-            // step
-            hit_x += step_x;
-            hit_y += step_y;
-        }
-    }
+//             // step
+//             hit_x += step_x;
+//             hit_y += step_y;
+//         }
+//     }
 
-    // Draw ceiling
-    for (int y = SCREEN_SIZE_Y / 2 + 1; y < SCREEN_SIZE_Y; y++)
-    {
-        // Radius
-        f32 zpp = (y - (SCREEN_SIZE_Y / 2.0f)) * (camera->fov.y / SCREEN_SIZE_Y);
-        f32 radius = (WALL_HEIGHT - camera->z) / zpp; // TODO: Precompute for each y
+//     // Draw ceiling
+//     for (int y = SCREEN_SIZE_Y / 2 + 1; y < SCREEN_SIZE_Y; y++)
+//     {
+//         // Radius
+//         f32 zpp = (y - (SCREEN_SIZE_Y / 2.0f)) * (camera->fov.y / SCREEN_SIZE_Y);
+//         f32 radius = (WALL_HEIGHT - camera->z) / zpp; // TODO: Precompute for each y
 
-        // Location of the 1st ray's intersection
-        f32 hit_x = camera->pos.x + radius * ray_dir_lo_x;
-        f32 hit_y = camera->pos.y + radius * ray_dir_lo_y;
+//         // Location of the 1st ray's intersection
+//         f32 hit_x = camera->pos.x + radius * ray_dir_lo_x;
+//         f32 hit_y = camera->pos.y + radius * ray_dir_lo_y;
 
-        // Each step toward hit2
-        f32 step_x = radius * (ray_dir_hi_x - ray_dir_lo_x) / SCREEN_SIZE_X;
-        f32 step_y = radius * (ray_dir_hi_y - ray_dir_lo_y) / SCREEN_SIZE_X;
+//         // Each step toward hit2
+//         f32 step_x = radius * (ray_dir_hi_x - ray_dir_lo_x) / SCREEN_SIZE_X;
+//         f32 step_y = radius * (ray_dir_hi_y - ray_dir_lo_y) / SCREEN_SIZE_X;
 
-        for (int x = 0; x < SCREEN_SIZE_X; x++)
-        {
-            // int x_ind_hit = (int)(floorf(hit_x / TILE_WIDTH));
-            // int y_ind_hit = (int)(floorf(hit_y / TILE_WIDTH));
-            // f32 x_rem_hit = hit_x - TILE_WIDTH * x_ind_hit;
-            // f32 y_rem_hit = hit_y - TILE_WIDTH * y_ind_hit;
-            // x_ind_hit = clamp(x_ind_hit, 0, MAPDATA.n_tiles_x - 1);
-            // y_ind_hit = clamp(y_ind_hit, 0, MAPDATA.n_tiles_y - 1);
+//         for (int x = 0; x < SCREEN_SIZE_X; x++)
+//         {
+//             // int x_ind_hit = (int)(floorf(hit_x / TILE_WIDTH));
+//             // int y_ind_hit = (int)(floorf(hit_y / TILE_WIDTH));
+//             // f32 x_rem_hit = hit_x - TILE_WIDTH * x_ind_hit;
+//             // f32 y_rem_hit = hit_y - TILE_WIDTH * y_ind_hit;
+//             // x_ind_hit = clamp(x_ind_hit, 0, MAPDATA.n_tiles_x - 1);
+//             // y_ind_hit = clamp(y_ind_hit, 0, MAPDATA.n_tiles_y - 1);
 
-            u32 texture_x_offset = 0;
-            u32 texture_y_offset = 0; // (MAPDATA.ceiling[GetMapDataIndex(&MAPDATA, x_ind_hit, y_ind_hit)] - 1) * TEXTURE_SIZE;
+//             u32 texture_x_offset = 0;
+//             u32 texture_y_offset = 0; // (MAPDATA.ceiling[GetMapDataIndex(&MAPDATA, x_ind_hit, y_ind_hit)] - 1) * TEXTURE_SIZE;
 
-            u32 texture_x = 5; // (int)(x_rem_hit / TILE_WIDTH * TEXTURE_SIZE);
-            u32 texture_y = 5; // (int)(y_rem_hit / TILE_WIDTH * TEXTURE_SIZE);
+//             u32 texture_x = 5; // (int)(x_rem_hit / TILE_WIDTH * TEXTURE_SIZE);
+//             u32 texture_y = 5; // (int)(y_rem_hit / TILE_WIDTH * TEXTURE_SIZE);
 
-            u32 color = GetColumnMajorPixelAt(&BITMAP, texture_x + texture_x_offset, texture_y + texture_y_offset);
-            pixels[(y * SCREEN_SIZE_X) + x] = color;
+//             u32 color = GetColumnMajorPixelAt(&BITMAP, texture_x + texture_x_offset, texture_y + texture_y_offset);
+//             pixels[(y * SCREEN_SIZE_X) + x] = color;
 
-            // step
-            hit_x += step_x;
-            hit_y += step_y;
-        }
-    }
-}
+//             // step
+//             hit_x += step_x;
+//             hit_y += step_y;
+//         }
+//     }
+// }
 
 void RenderWalls(
     u32 *pixels,
