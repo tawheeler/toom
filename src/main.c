@@ -43,9 +43,15 @@ struct CameraState
 // ------------------------------------------------------------------------------
 // DOOM Assets
 
-//  Each palette in the PLAYPAL lump contains 256 colors totaling 768 bytes,
+//  Each palette contains 256 colors totaling 768 bytes,
 //  where each color is broken into three unsigned bytes. Each of these color components (red, green, and blue) range between 0 and 255.
 u32 PALETTE_OFFSET = 0;
+u32 PALETTE_COUNT = 0;
+
+// Each colormap is a u8[256] that maps from an original palette index
+// to a new palette index.
+u32 COLORMAP_OFFSET = 0;
+u32 COLORMAP_COUNT = 0;
 
 struct Patch
 {
@@ -216,7 +222,16 @@ static void LoadAssets(struct GameMap *game_map)
                 // TODO: Import other palettes.
                 PALETTE_OFFSET = offset;
             }
-            if (strcmp(entry->name, "patches") == 0)
+            else if (strcmp(entry->name, "colormaps") == 0)
+            {
+                u32 offset = entry->offset;
+
+                COLORMAP_COUNT = *(u32 *)(ASSETS_BINARY_BLOB2 + offset);
+                offset += sizeof(u32);
+
+                COLORMAP_OFFSET = offset;
+            }
+            else if (strcmp(entry->name, "patches") == 0)
             {
                 u32 offset = entry->offset;
 
@@ -322,7 +337,7 @@ static void LoadAssets(struct GameMap *game_map)
 void RenderPatchColumn(u32 *pixels, int x_screen, int y_lower,
                        int y_upper, int y_lo, int y_hi, f32 x_along_texture,
                        u32 x_base_offset, u32 y_base_offset,
-                       f32 column_height, u32 patch_offset)
+                       f32 column_height, u32 patch_offset, u32 colormap_offset)
 {
     // TODO: renderdata
     u32 n_pixels_per_world_unit = 64;
@@ -330,6 +345,7 @@ void RenderPatchColumn(u32 *pixels, int x_screen, int y_lower,
     // TODO: for now, ignore y_base_offset.
 
     struct Patch *patch = (struct Patch *)(ASSETS_BINARY_BLOB2 + patch_offset);
+    u8 *colormap = (u8 *)(ASSETS_BINARY_BLOB2 + colormap_offset);
 
     // Get the start of the post data
     // NOTE: sizeof(Patch) includes one u32, so we have to additionally traverse via the other ones.
@@ -386,7 +402,7 @@ void RenderPatchColumn(u32 *pixels, int x_screen, int y_lower,
 
                 // Render pixels
                 u8 palette_index = post_data[column_offset];
-                // palette_index = colormap.map[palette_index]; // TODO
+                palette_index = colormap[palette_index];
                 u8 r = *(u8 *)(ASSETS_BINARY_BLOB2 + PALETTE_OFFSET + 3 * palette_index);
                 u8 g = *(u8 *)(ASSETS_BINARY_BLOB2 + PALETTE_OFFSET + 3 * palette_index + 1);
                 u8 b = *(u8 *)(ASSETS_BINARY_BLOB2 + PALETTE_OFFSET + 3 * palette_index + 2);
@@ -669,8 +685,31 @@ void RenderWalls(
 
                     // Calculate where along the segment we intersected.
                     QuarterEdge *qe_face_src = QETor(qe_dual);
+                    f32 v_face_len = length(v_face);
                     f32 x_along_texture =
-                        length(v_face) - length(sub(pos, *(qe_face_src->vertex)));
+                        v_face_len - length(sub(pos, *(qe_face_src->vertex)));
+
+                    // Determine the light level
+                    u8 light_level_sector = 0;          // base light level (TODO: Move to sector data.)
+                    f32 darkness_per_world_dist = 3.0f; // TODO: magic number
+                    u8 colormap_index =
+                        light_level_sector + (u8)(darkness_per_world_dist * ray_len);
+
+                    // Make faces that run closer to north-south brighter, and faces running closer
+                    // to east-west darker. (cos > 0.7071). We're using the law of cosines.
+                    bool face_is_closer_to_east_west = v_face.x / v_face_len > 0.7071;
+                    if (face_is_closer_to_east_west)
+                    {
+                        colormap_index += 1; // darker
+                    }
+                    else if (colormap_index > 0)
+                    {
+                        colormap_index -= 1; // lighter
+                    }
+
+                    u8 max_colormap_index = 32 - 1;
+                    colormap_index = min(colormap_index, max_colormap_index);
+                    u32 colormap_offset = COLORMAP_OFFSET + colormap_index * 256 * sizeof(u8);
 
                     // Render the ceiling above the upper texture
                     while (y_hi > y_ceil)
@@ -689,7 +728,7 @@ void RenderWalls(
                             x_along_texture,
                             side_info->texture_info_upper.x_offset,
                             side_info->texture_info_upper.y_offset, column_height,
-                            patch_offset);
+                            patch_offset, colormap_offset);
                         y_hi = y_upper;
                     }
 
@@ -708,7 +747,7 @@ void RenderWalls(
                         RenderPatchColumn(
                             pixels, x, y_floor, y_lower, y_lo,
                             y_lower, x_along_texture, side_info->texture_info_lower.x_offset,
-                            side_info->texture_info_lower.y_offset, column_height, patch_offset);
+                            side_info->texture_info_lower.y_offset, column_height, patch_offset, colormap_offset);
 
                         y_lo = y_lower;
                     }
@@ -725,7 +764,7 @@ void RenderWalls(
                     RenderPatchColumn(
                         pixels, x, y_lower, y_upper, y_lo, y_hi, x_along_texture,
                         side_info->texture_info_lower.x_offset,
-                        side_info->texture_info_lower.y_offset, column_height, patch_offset);
+                        side_info->texture_info_lower.y_offset, column_height, patch_offset, colormap_offset);
 
                     break;
                 }
