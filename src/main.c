@@ -53,11 +53,11 @@ u32 PALETTE_OFFSET = 0;
 
 struct Patch
 {
-    u16 size_x;   // width of the graphic in pixels
-    u16 size_y;   // height of the graphic in pixels
-    i16 offset_x; // x offset from the screen origin (to left)
-    i16 offset_y; // y offset from the screen origin (down)
-    u32 column_offsets[64];
+    u16 size_x;            // width of the graphic in pixels
+    u16 size_y;            // height of the graphic in pixels
+    i16 offset_x;          // x offset from the screen origin (to left)
+    i16 offset_y;          // y offset from the screen origin (down)
+    u32 column_offsets[1]; // Actually of length `size_x`.
 };
 
 struct PatchEntry
@@ -65,8 +65,10 @@ struct PatchEntry
     u32 byte_offset;
     struct Patch *patch;
 };
-struct PatchEntry CYBR_PATCH_ENTRIES[8];
 struct PatchEntry SKEL_PATCH_ENTRIES[360];
+
+u32 PATCH_COUNT;    // number of patches
+u32 *PATCH_OFFSETS; // the start of each patch (past the 16-char name to match our struct)
 
 // ------------------------------------------------------------------------------
 // TOOM Assets
@@ -146,8 +148,6 @@ static void LoadAssets(struct GameMap *game_map)
         u32 n_toc_entries = *(u32 *)(ASSETS_BINARY_BLOB + byte_index);
         ASSERT(ASSETS_BINARY_BLOB_SIZE > sizeof(struct BinaryAssetTableOfContentEntry) * n_toc_entries + 4, "Number of table of content entries is impossible given the number of bytes\n");
 
-        bool loaded_textures = 0;
-
         // Scan through them in reverse order
         for (int i = n_toc_entries; i > 0; i--)
         {
@@ -158,21 +158,21 @@ static void LoadAssets(struct GameMap *game_map)
             printf("Entry %d: %s at offset %d\n", i, entry->name, entry->byte_offset);
 
             // In the future, load them into a map or something. For now, we're specifically looking for either the wall or floor textures.
-            if (strcmp(entry->name, "textures") == 0)
-            {
-                u32 asset_byte_offset = entry->byte_offset;
-                BITMAP.n_pixels = *(u32 *)(ASSETS_BINARY_BLOB + asset_byte_offset);
-                asset_byte_offset += sizeof(u32);
-                BITMAP.n_pixels_per_column = *(u32 *)(ASSETS_BINARY_BLOB + asset_byte_offset);
-                asset_byte_offset += sizeof(u32);
-                BITMAP.column_major = ASSETS_BINARY_BLOB[asset_byte_offset];
-                ASSERT(BITMAP.column_major, "Expected the wall texture to be column-major\n");
-                asset_byte_offset += sizeof(u8);
-                BITMAP.abgr = (u32 *)(ASSETS_BINARY_BLOB + asset_byte_offset);
-                BITMAP.n_pixels_per_row = BITMAP.n_pixels / BITMAP.n_pixels_per_column;
-                loaded_textures = 1;
-            }
-            else if (strncmp(entry->name, "SKEL", 4) == 0)
+            // if (strcmp(entry->name, "textures") == 0)
+            // {
+            //     u32 asset_byte_offset = entry->byte_offset;
+            //     BITMAP.n_pixels = *(u32 *)(ASSETS_BINARY_BLOB + asset_byte_offset);
+            //     asset_byte_offset += sizeof(u32);
+            //     BITMAP.n_pixels_per_column = *(u32 *)(ASSETS_BINARY_BLOB + asset_byte_offset);
+            //     asset_byte_offset += sizeof(u32);
+            //     BITMAP.column_major = ASSETS_BINARY_BLOB[asset_byte_offset];
+            //     ASSERT(BITMAP.column_major, "Expected the wall texture to be column-major\n");
+            //     asset_byte_offset += sizeof(u8);
+            //     BITMAP.abgr = (u32 *)(ASSETS_BINARY_BLOB + asset_byte_offset);
+            //     BITMAP.n_pixels_per_row = BITMAP.n_pixels / BITMAP.n_pixels_per_column;
+            //     loaded_textures = 1;
+            // } else
+            if (strncmp(entry->name, "SKEL", 4) == 0)
             {
                 int frame_index = entry->name[4] - '0';
                 frame_index = 10 * frame_index + (entry->name[5] - '0');
@@ -181,14 +181,13 @@ static void LoadAssets(struct GameMap *game_map)
                 SKEL_PATCH_ENTRIES[frame_index].patch = (struct Patch *)(ASSETS_BINARY_BLOB + entry->byte_offset);
             }
         }
-
-        ASSERT(loaded_textures > 0, "Textures not loaded from assets\n");
     }
 
     // Load assets #2
     if (ASSETS_BINARY_BLOB2)
     {
         free(ASSETS_BINARY_BLOB2);
+        free(PATCH_OFFSETS);
     }
     {
         // The format is:
@@ -226,9 +225,48 @@ static void LoadAssets(struct GameMap *game_map)
             printf("Entry %d: %.16s at offset %d with size %d\n", toc_index, entry->name, entry->offset, entry->size);
             offset += sizeof(struct BinaryAsset2TableOfContentEntry);
 
-            if (strcmp(entry->name, "palette") == 0)
+            if (strcmp(entry->name, "palettes") == 0)
             {
-                PALETTE_OFFSET = entry->offset;
+                u32 offset = entry->offset;
+
+                u32 n_palettes = *(u32 *)(ASSETS_BINARY_BLOB2 + offset);
+                offset += sizeof(u32);
+
+                // TODO: Import other palettes.
+                PALETTE_OFFSET = offset;
+            }
+            if (strcmp(entry->name, "patches") == 0)
+            {
+                u32 offset = entry->offset;
+
+                PATCH_COUNT = *(u32 *)(ASSETS_BINARY_BLOB2 + offset);
+                offset += sizeof(u32);
+
+                PATCH_OFFSETS = (u32 *)malloc(PATCH_COUNT * sizeof(u32));
+                ASSERT(PATCH_OFFSETS, "Failed to allocate patch offsets\n");
+
+                for (u32 i_patch = 0; i_patch < PATCH_COUNT; i_patch++)
+                {
+                    // Skip the 16-char name
+                    offset += 16;
+
+                    // Set the patch
+                    PATCH_OFFSETS[i_patch] = offset;
+
+                    // Skip the patch header data
+                    u16 size_x = *(u16 *)(ASSETS_BINARY_BLOB2 + offset);
+                    offset += sizeof(u16);
+                    offset += sizeof(u16);
+                    offset += sizeof(u16);
+                    offset += sizeof(u16);
+
+                    // Skip the column offsets
+                    offset += size_x * sizeof(u32);
+
+                    // Skip the post data
+                    u32 n_bytes_post_data = *(u32 *)(ASSETS_BINARY_BLOB2 + offset);
+                    offset += sizeof(u32) + n_bytes_post_data;
+                }
             }
             else if (strcmp(entry->name, "geometry_mesh") == 0)
             {
@@ -300,44 +338,102 @@ static void LoadAssets(struct GameMap *game_map)
     }
 }
 
-void RenderTextureColumn(u32 *pixels, int x, int screen_size_x, int screen_size_y, int y_lower,
-                         int y_upper, int y_lo, int y_hi, f32 x_along_texture,
-                         u32 texture_x_offset_base, u32 texture_y_offset_base, u32 texture_size_x,
-                         u32 texture_size_y, u32 x_base_offset, u32 y_base_offset,
-                         f32 texture_z_height, struct Bitmap *bitmap)
+void RenderPatchColumn(u32 *pixels, int x_screen, int y_lower,
+                       int y_upper, int y_lo, int y_hi, f32 x_along_texture,
+                       u32 x_base_offset, u32 y_base_offset,
+                       f32 column_height, u32 patch_offset)
 {
-    f32 PIX_PER_DISTANCE = texture_size_x / TILE_WIDTH;
+    // TODO: renderdata
+    u32 n_pixels_per_world_unit = 64;
 
-    u32 texture_x = ((int)(PIX_PER_DISTANCE * x_along_texture) + x_base_offset) % texture_size_x +
-                    texture_x_offset_base;
-    u32 baseline = GetColumnMajorPixelIndex(bitmap, texture_x, texture_y_offset_base);
+    // TODO: for now, ignore y_base_offset.
+
+    struct Patch *patch = (struct Patch *)(ASSETS_BINARY_BLOB2 + patch_offset);
+
+    // Get the start of the post data
+    // NOTE: sizeof(Patch) includes one u32, so we have to additionally traverse via the other ones.
+    //       plus we have to bypass the number of bytes (as a u32).
+    u8 *post_data = (u8 *)(ASSETS_BINARY_BLOB2 + patch_offset + sizeof(struct Patch) + sizeof(u32) * patch->size_x);
+
+    // The index into the patch of the column that we want to draw.
+    u32 x_patch = ((int)(n_pixels_per_world_unit * x_along_texture) + x_base_offset) %
+                  patch->size_x;
 
     // y_lower = screen y coordinate of bottom of column (can exceed screen bounds)
     // y_upper = screen y coordinate of top of column (can exceed screen bounds)
     // y_lo    = screen y coordinate where we end drawing (does not exceed screen bounds)
     // y_hi    = screen y coordinate where we start drawing (does not exceed screen bounds)
-    // texture_z_height = real-world height of the painting surface
+    // column_height = real-world height of the painting surface
 
-    // y_step is the number of (continuous) texture pixels y changes per screen pixel
-    f32 m = (f32)(texture_size_y * texture_z_height - 1) / (y_lower - y_upper);
-    f32 b = -m * y_upper;
-    f32 y_step = m * 1.0f;
+    // How many patch pixels high the column is.
+    f32 y_patch_height_pix = n_pixels_per_world_unit * column_height;
 
-    // The (continuous) texture y pixel we are at at the top of the rendered image
-    f32 y_loc = m * (2 * y_upper - y_hi) + b;
+    // y_patch = m * y_screen + b for converting screen to patch coordinate
+    //                         0 = m * y_upper + b   -> b = -m * y_upper
+    //    y_patch_height_pix - 1 = m * y_lower + b
+    //                           = m * y_lower - m * y_upper
+    //                           = m * (y_lower - y_upper)
+    // m = (y_patch_height_pix - 1) / (y_lower - y_upper)
 
-    for (int y = y_hi - 1; y > y_lo; y--)
+    f32 m = (f32)(y_patch_height_pix - 1.0f) / (y_lower - y_upper);
+
+    // The number of (continuous) patch pixels y changes per screen pixel
+    f32 y_patch_step_per_screen_pixel = m; // If y_screen goes up by 1, y_patch goes up this much
+    f32 y_screen_step_per_patch_pixel = 1.0f / m;
+
+    f32 y_patch = 0.0f;
+    f32 y_screen = y_upper;
+    while (y_screen > y_lo)
     {
-        // u32 texture_y = std::min((u32)(y_loc), texture_size_y - 1);
-        u32 texture_y = ((int)(y_loc) + y_base_offset) % texture_size_y;
-
-        u32 color = bitmap->abgr[texture_y + baseline];
-        if ((y * screen_size_x) + x >= 360 * 720)
+        u32 column_offset = patch->column_offsets[x_patch];
+        while (post_data[column_offset] != 0xFF)
         {
-            printf("bad!");
+            u8 y_patch_delta = post_data[column_offset];
+            column_offset++;
+            int post_length = post_data[column_offset];
+            column_offset++;
+
+            // skip transparent pixels
+            y_patch += y_patch_delta;
+            y_screen += y_patch_delta * y_screen_step_per_patch_pixel;
+
+            // process the post. We have `post_length` pixels to draw
+            while (post_length > 0 && y_screen > y_lo)
+            {
+                // Keep decreasing y_screen (and increasing y_patch) as long as we are within the
+                // post data.
+
+                // Render pixels
+                u8 palette_index = post_data[column_offset];
+                // palette_index = colormap.map[palette_index]; // TODO
+                u8 r = *(u8 *)(ASSETS_BINARY_BLOB2 + PALETTE_OFFSET + 3 * palette_index);
+                u8 g = *(u8 *)(ASSETS_BINARY_BLOB2 + PALETTE_OFFSET + 3 * palette_index + 1);
+                u8 b = *(u8 *)(ASSETS_BINARY_BLOB2 + PALETTE_OFFSET + 3 * palette_index + 2);
+                u32 abgr = 0xFF000000 + (((u32)b) << 16) + (((u32)g) << 8) + r;
+
+                // Render this color for all screen pixels that map to y_patch
+                u16 y_patch_discrete = (u16)y_patch;
+                int y_screen_discrete = (int)y_screen;
+                while ((u16)y_patch == y_patch_discrete)
+                {
+                    if (y_screen_discrete < y_hi && y_screen_discrete > y_lo)
+                    {
+                        pixels[(y_screen_discrete * SCREEN_SIZE_X) + x_screen] = abgr;
+                    }
+                    y_screen_discrete -= 1;
+                    y_screen -= 1.0f;
+                    y_patch -= y_patch_step_per_screen_pixel;
+                }
+
+                u16 patch_delta = (u16)y_patch - y_patch_discrete;
+                while (patch_delta > 0)
+                {
+                    column_offset += 1;
+                    post_length -= 1;
+                    patch_delta -= 1;
+                }
+            }
         }
-        pixels[(y * screen_size_x) + x] = color;
-        y_loc += y_step;
     }
 }
 
@@ -594,8 +690,6 @@ void RenderWalls(
                     QuarterEdge *qe_face_src = QETor(qe_dual);
                     f32 x_along_texture =
                         length(v_face) - length(sub(pos, *(qe_face_src->vertex)));
-                    u32 texture_x_offset_base =
-                        (side_info->flags & SIDEINFO_FLAG_DARK) > 0 ? TEXTURE_SIZE : 0;
 
                     // Render the ceiling above the upper texture
                     while (y_hi > y_ceil)
@@ -607,14 +701,14 @@ void RenderWalls(
                     // Render the upper texture
                     if (y_upper < y_hi)
                     {
-                        f32 texture_z_height = z_ceil - z_upper;
-                        u32 texture_y_offset_base =
-                            side_info->texture_info_upper.texture_id * TEXTURE_SIZE;
-                        RenderTextureColumn(
-                            pixels, x, SCREEN_SIZE_X, SCREEN_SIZE_Y, y_upper, y_ceil, y_upper, y_hi,
-                            x_along_texture, texture_x_offset_base, texture_y_offset_base,
-                            TEXTURE_SIZE, TEXTURE_SIZE, side_info->texture_info_upper.x_offset,
-                            side_info->texture_info_upper.y_offset, texture_z_height, &BITMAP);
+                        u32 patch_offset = PATCH_OFFSETS[side_info->texture_info_upper.texture_id];
+                        f32 column_height = z_ceil - z_upper;
+                        RenderPatchColumn(
+                            pixels, x, y_upper, y_ceil, y_upper, y_hi,
+                            x_along_texture,
+                            side_info->texture_info_upper.x_offset,
+                            side_info->texture_info_upper.y_offset, column_height,
+                            patch_offset);
                         y_hi = y_upper;
                     }
 
@@ -628,14 +722,13 @@ void RenderWalls(
                     // Render the lower texture
                     if (y_lower > y_lo)
                     {
-                        f32 texture_z_height = z_lower - z_floor;
-                        u32 texture_y_offset_base =
-                            side_info->texture_info_lower.texture_id * TEXTURE_SIZE;
-                        RenderTextureColumn(
-                            pixels, x, SCREEN_SIZE_X, SCREEN_SIZE_Y, y_floor, y_lower, y_lo,
-                            y_lower, x_along_texture, texture_x_offset_base, texture_y_offset_base,
-                            TEXTURE_SIZE, TEXTURE_SIZE, side_info->texture_info_lower.x_offset,
-                            side_info->texture_info_lower.y_offset, texture_z_height, &BITMAP);
+                        u32 patch_offset = PATCH_OFFSETS[side_info->texture_info_lower.texture_id];
+                        f32 column_height = z_lower - z_floor;
+                        RenderPatchColumn(
+                            pixels, x, y_floor, y_lower, y_lo,
+                            y_lower, x_along_texture, side_info->texture_info_lower.x_offset,
+                            side_info->texture_info_lower.y_offset, column_height, patch_offset);
+
                         y_lo = y_lower;
                     }
 
@@ -646,14 +739,12 @@ void RenderWalls(
                     }
 
                     // The side info has a solid wall.
-                    f32 texture_z_height = z_upper - z_lower;
-                    u32 texture_y_offset_base =
-                        side_info->texture_info_middle.texture_id * TEXTURE_SIZE;
-                    RenderTextureColumn(
-                        pixels, x, SCREEN_SIZE_X, SCREEN_SIZE_Y, y_lower, y_upper, y_lo, y_hi,
-                        x_along_texture, texture_x_offset_base, texture_y_offset_base, TEXTURE_SIZE,
-                        TEXTURE_SIZE, side_info->texture_info_middle.x_offset,
-                        side_info->texture_info_middle.y_offset, texture_z_height, &BITMAP);
+                    u32 patch_offset = PATCH_OFFSETS[side_info->texture_info_middle.texture_id];
+                    f32 column_height = z_upper - z_lower;
+                    RenderPatchColumn(
+                        pixels, x, y_lower, y_upper, y_lo, y_hi, x_along_texture,
+                        side_info->texture_info_lower.x_offset,
+                        side_info->texture_info_lower.y_offset, column_height, patch_offset);
 
                     break;
                 }
@@ -1202,6 +1293,7 @@ int main(int argc, char *argv[])
     // Free our assets
     free(ASSETS_BINARY_BLOB);
     free(ASSETS_BINARY_BLOB2);
+    free(PATCH_OFFSETS);
 
     return 0;
 }
