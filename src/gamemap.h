@@ -27,6 +27,9 @@ struct SideInfo
 struct Sector
 {
     u16 flags;
+    u16 flat_id_floor;
+    u16 flat_id_ceil;
+    u8 light_level; // Colormap index. 0 is brightest.
     f32 z_floor;
     f32 z_ceil;
 };

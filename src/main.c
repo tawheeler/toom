@@ -53,6 +53,8 @@ u32 PALETTE_COUNT = 0;
 u32 COLORMAP_OFFSET = 0;
 u32 COLORMAP_COUNT = 0;
 
+// A patch is a vertically-oriented texture for drawing wall images or sprites.
+// It is stored in vertical pixel columns, and because spans of these columns can be transparent, each column contains sequences of non-transparent pixels.
 struct Patch
 {
     u16 size_x;            // width of the graphic in pixels
@@ -71,6 +73,31 @@ struct PatchEntry SKEL_PATCH_ENTRIES[360];
 
 u32 PATCH_COUNT;    // number of patches
 u32 *PATCH_OFFSETS; // the start of each patch (past the 16-char name to match our struct)
+
+// A flat is a horiontally-oriented texture for drawing floors and ceilings.
+// Flats are always grid-aligned (i.e. are never drawn with offset_x or offset_y, and are never rotated).
+// Flats are 64x64.
+struct Flat
+{
+    char name[16];
+    u8 data[4096]; // pixel indices
+};
+
+u32 FLAT_COUNT;  // number of flats
+u32 FLAT_OFFSET; // the start of the first flat
+
+// ------------------------------------------------------------------------------
+struct ActiveSpanData
+{
+    v2 hit;        // Location of ray_dir_lo's intersection with the ground.
+    v2 step;       // Amount to shift 'hit' per pix column moved toward hi's intersection.
+    u16 sector_id; // The sector id for this span.
+    u16 flat_id;   // The flat id for this span (floor or ceiling)
+    u8 colormap_index;
+    bool is_active; // Whether there is an active span.
+    int x_start;    // The camera x pixel index where this span starts.
+    int x_end;      // The most recent camera x pixel where this span currently ends.
+};
 
 // ------------------------------------------------------------------------------
 // TOOM Assets
@@ -95,7 +122,8 @@ struct
 
     u32 pixels[SCREEN_SIZE_X * SCREEN_SIZE_Y]; // row-major
 
-    f32 wall_raycast_radius[SCREEN_SIZE_X];
+    f32 raycast_distances[SCREEN_SIZE_X];
+    struct ActiveSpanData active_spans[SCREEN_SIZE_Y];
 
     bool quit;
 
@@ -263,6 +291,15 @@ static void LoadAssets(struct GameMap *game_map)
                     u32 n_bytes_post_data = *(u32 *)(ASSETS_BINARY_BLOB2 + offset);
                     offset += sizeof(u32) + n_bytes_post_data;
                 }
+            }
+            else if (strcmp(entry->name, "flats") == 0)
+            {
+                u32 offset = entry->offset;
+
+                FLAT_COUNT = *(u32 *)(ASSETS_BINARY_BLOB2 + offset);
+                offset += sizeof(u32);
+
+                FLAT_OFFSET = offset;
             }
             else if (strcmp(entry->name, "geometry_mesh") == 0)
             {
@@ -434,105 +471,48 @@ void RenderPatchColumn(u32 *pixels, int x_screen, int y_lower,
     }
 }
 
-// void RenderFloorAndCeiling(
-//     u32 *pixels,
-//     struct CameraState *camera)
-// {
-//     // Ray direction for x = 0
-//     f32 half_camera_width = camera->fov.x / 2.0f;
-//     f32 ray_dir_lo_x = camera->dir.x - half_camera_width * camera->dir.y;
-//     f32 ray_dir_lo_y = camera->dir.y + half_camera_width * camera->dir.x;
+// ------------------------------------------------------------------------------------------------
+void RenderSpan(u32 *pixels, struct ActiveSpanData *span, int y_screen)
+{
 
-//     // Ray direction for x = SCREEN_SIZE_X
-//     f32 ray_dir_hi_x = camera->dir.x + half_camera_width * camera->dir.y;
-//     f32 ray_dir_hi_y = camera->dir.y - half_camera_width * camera->dir.x;
+    // Advance `hit` to the current location
+    span->hit.x += span->step.x * span->x_start;
+    span->hit.y += span->step.y * span->x_start;
 
-//     // Draw floor
-//     for (int y = 0; y < SCREEN_SIZE_Y / 2; y++)
-//     {
-//         // Radius
-//         f32 zpp = (SCREEN_SIZE_Y / 2.0f - y) * (camera->fov.y / SCREEN_SIZE_Y);
-//         f32 radius = camera->z / zpp; // TODO: Precompute for each y
+    u8 *colormap = (u8 *)(ASSETS_BINARY_BLOB2 + COLORMAP_OFFSET + span->colormap_index * 256 * sizeof(u8));
 
-//         // Location of the 1st ray's intersection
-//         f32 hit_x = camera->pos.x + radius * ray_dir_lo_x;
-//         f32 hit_y = camera->pos.y + radius * ray_dir_lo_y;
+    int pixels_index = y_screen * SCREEN_SIZE_X + span->x_start;
+    for (int x_span = span->x_start; x_span < span->x_end; x_span++)
+    {
+        // Tile width is 1.0f
+        int x_ind_hit = (int)floorf(span->hit.x);
+        int y_ind_hit = (int)floorf(span->hit.y);
+        f32 x_rem_hit = span->hit.x - x_ind_hit;
+        f32 y_rem_hit = span->hit.y - y_ind_hit;
+        u32 texture_x = (int)(x_rem_hit * 64.0f); // Floor textures are always 64x64
+        u32 texture_y = (int)(y_rem_hit * 64.0f);
 
-//         // Each step is (hit_x2 - hit_x) / SCREEN_SIZE_X;
-//         // = ((camera->pos.x + radius * ray_dir_lo_x) - (camera->pos.x + radius * ray_dir_lo_x)) / SCREEN_SIZE_X
-//         // = (radius * ray_dir_lo_x - (radius * ray_dir_lo_x)) / SCREEN_SIZE_X
-//         // = radius * (ray_dir_hi_x - ray_dir_lo_x) / SCREEN_SIZE_X
-//         f32 step_x = radius * (ray_dir_hi_x - ray_dir_lo_x) / SCREEN_SIZE_X;
-//         f32 step_y = radius * (ray_dir_hi_y - ray_dir_lo_y) / SCREEN_SIZE_X;
+        struct Flat *flat = (struct Flat *)(ASSETS_BINARY_BLOB2 + FLAT_OFFSET + span->flat_id * sizeof(struct Flat));
+        u8 palette_index = flat->data[texture_x + (texture_y << 6)];
+        palette_index = colormap[palette_index];
+        u8 r = *(u8 *)(ASSETS_BINARY_BLOB2 + PALETTE_OFFSET + 3 * palette_index);
+        u8 g = *(u8 *)(ASSETS_BINARY_BLOB2 + PALETTE_OFFSET + 3 * palette_index + 1);
+        u8 b = *(u8 *)(ASSETS_BINARY_BLOB2 + PALETTE_OFFSET + 3 * palette_index + 2);
+        u32 abgr = 0xFF000000 + (((u32)b) << 16) + (((u32)g) << 8) + r;
 
-//         for (int x = 0; x < SCREEN_SIZE_X; x++)
-//         {
+        pixels[pixels_index] = abgr;
 
-//             // int x_ind_hit = (int)(floorf(hit_x / TILE_WIDTH));
-//             // int y_ind_hit = (int)(floorf(hit_y / TILE_WIDTH));
-//             // f32 x_rem_hit = hit_x - TILE_WIDTH * x_ind_hit;
-//             // f32 y_rem_hit = hit_y - TILE_WIDTH * y_ind_hit;
-//             // x_ind_hit = clamp(x_ind_hit, 0, MAPDATA.n_tiles_x - 1);
-//             // y_ind_hit = clamp(y_ind_hit, 0, MAPDATA.n_tiles_y - 1);
+        // Step
+        span->hit.x += span->step.x;
+        span->hit.y += span->step.y;
+        pixels_index += 1;
+    }
+}
 
-//             u32 texture_x_offset = 0;
-//             u32 texture_y_offset = 0; // (MAPDATA.floor[GetMapDataIndex(&MAPDATA, x_ind_hit, y_ind_hit)] - 1) * TEXTURE_SIZE;
-
-//             u32 texture_x = 0; // (int)(x_rem_hit / TILE_WIDTH * TEXTURE_SIZE);
-//             u32 texture_y = 0; // (int)(y_rem_hit / TILE_WIDTH * TEXTURE_SIZE);
-
-//             u32 color = GetColumnMajorPixelAt(&BITMAP, texture_x + texture_x_offset, texture_y + texture_y_offset);
-//             pixels[(y * SCREEN_SIZE_X) + x] = color;
-
-//             // step
-//             hit_x += step_x;
-//             hit_y += step_y;
-//         }
-//     }
-
-//     // Draw ceiling
-//     for (int y = SCREEN_SIZE_Y / 2 + 1; y < SCREEN_SIZE_Y; y++)
-//     {
-//         // Radius
-//         f32 zpp = (y - (SCREEN_SIZE_Y / 2.0f)) * (camera->fov.y / SCREEN_SIZE_Y);
-//         f32 radius = (WALL_HEIGHT - camera->z) / zpp; // TODO: Precompute for each y
-
-//         // Location of the 1st ray's intersection
-//         f32 hit_x = camera->pos.x + radius * ray_dir_lo_x;
-//         f32 hit_y = camera->pos.y + radius * ray_dir_lo_y;
-
-//         // Each step toward hit2
-//         f32 step_x = radius * (ray_dir_hi_x - ray_dir_lo_x) / SCREEN_SIZE_X;
-//         f32 step_y = radius * (ray_dir_hi_y - ray_dir_lo_y) / SCREEN_SIZE_X;
-
-//         for (int x = 0; x < SCREEN_SIZE_X; x++)
-//         {
-//             // int x_ind_hit = (int)(floorf(hit_x / TILE_WIDTH));
-//             // int y_ind_hit = (int)(floorf(hit_y / TILE_WIDTH));
-//             // f32 x_rem_hit = hit_x - TILE_WIDTH * x_ind_hit;
-//             // f32 y_rem_hit = hit_y - TILE_WIDTH * y_ind_hit;
-//             // x_ind_hit = clamp(x_ind_hit, 0, MAPDATA.n_tiles_x - 1);
-//             // y_ind_hit = clamp(y_ind_hit, 0, MAPDATA.n_tiles_y - 1);
-
-//             u32 texture_x_offset = 0;
-//             u32 texture_y_offset = 0; // (MAPDATA.ceiling[GetMapDataIndex(&MAPDATA, x_ind_hit, y_ind_hit)] - 1) * TEXTURE_SIZE;
-
-//             u32 texture_x = 5; // (int)(x_rem_hit / TILE_WIDTH * TEXTURE_SIZE);
-//             u32 texture_y = 5; // (int)(y_rem_hit / TILE_WIDTH * TEXTURE_SIZE);
-
-//             u32 color = GetColumnMajorPixelAt(&BITMAP, texture_x + texture_x_offset, texture_y + texture_y_offset);
-//             pixels[(y * SCREEN_SIZE_X) + x] = color;
-
-//             // step
-//             hit_x += step_x;
-//             hit_y += step_y;
-//         }
-//     }
-// }
-
-void RenderWalls(
+void Raycast(
     u32 *pixels,
-    f32 *wall_raycast_radius,
+    f32 *raycast_distances,
+    struct ActiveSpanData *active_spans,
     const struct CameraState *camera,
     const struct GameMap *game_map,
     QuarterEdge *qe_camera)
@@ -542,8 +522,19 @@ void RenderWalls(
     f32 half_screen_size = SCREEN_SIZE_Y / 2.0f;
     f32 screen_size_y_over_fov_y = SCREEN_SIZE_Y / camera->fov.y;
 
-    u32 color_ceil = 0xFF222222;
     u32 color_floor = 0xFF444444;
+
+    memset(raycast_distances, 0, sizeof(f32) * SCREEN_SIZE_X);
+    memset(active_spans, 0, sizeof(struct ActiveSpanData) * SCREEN_SIZE_Y);
+
+    // raycast direction for leftmost pixel column, x = 0
+    f32 half_camera_width = camera->fov.x / 2.0f;
+    v2 ray_dir_lo = {camera->dir.x - half_camera_width * camera->dir.y,
+                     camera->dir.y + half_camera_width * camera->dir.x};
+    // raycast direction for x = 0
+    // raycast direction for rightmost pixel column, x = screen_size_x
+    v2 ray_dir_hi = {camera->dir.x + half_camera_width * camera->dir.y,
+                     camera->dir.y - half_camera_width * camera->dir.x};
 
     for (int x = 0; x < SCREEN_SIZE_X; x++)
     {
@@ -650,7 +641,7 @@ void RenderWalls(
 
                     const f32 ray_len = max(length(sub(pos, camera->pos)), 0.01f);
                     const f32 gamma = cam_len / ray_len * screen_size_y_over_fov_y;
-                    wall_raycast_radius[x] = ray_len;
+                    raycast_distances[x] = ray_len;
 
                     struct Sector *sector = game_map->sectors + side_info->sector_id;
                     f32 z_ceil = sector->z_ceil;
@@ -691,7 +682,7 @@ void RenderWalls(
 
                     // Determine the light level
                     u8 light_level_sector = 0;          // base light level (TODO: Move to sector data.)
-                    f32 darkness_per_world_dist = 3.0f; // TODO: magic number
+                    f32 darkness_per_world_dist = 1.5f; // TODO: magic number
                     u8 colormap_index =
                         light_level_sector + (u8)(darkness_per_world_dist * ray_len);
 
@@ -712,10 +703,75 @@ void RenderWalls(
                     u32 colormap_offset = COLORMAP_OFFSET + colormap_index * 256 * sizeof(u8);
 
                     // Render the ceiling above the upper texture
+                    y_ceil = max(y_ceil, y_lo + 1);
                     while (y_hi > y_ceil)
                     {
                         y_hi--;
-                        pixels[(y_hi * SCREEN_SIZE_X) + x] = color_ceil;
+
+                        // TODO: Find a better way to skip this case / avoid it.
+                        //       (floor spans at or below the screen midline)
+                        if (y_hi <= SCREEN_SIZE_Y / 2.0f)
+                        {
+                            continue;
+                        }
+
+                        struct ActiveSpanData *active_span = active_spans + y_hi;
+
+                        // Render the span if we close it out - that is, the sector is different than
+                        // what it was before
+                        bool start_new_span = !active_span->is_active ||
+                                              active_span->sector_id != side_info->sector_id ||
+                                              active_span->x_end < x - 1;
+
+                        if (start_new_span && active_span->is_active)
+                        {
+                            // Render the span
+                            RenderSpan(pixels, active_span, y_hi);
+                        }
+
+                        if (start_new_span)
+                        {
+                            // Start a new span
+                            active_span->is_active = 1;
+                            active_span->x_start = x;
+                            active_span->x_end = x;
+                            active_span->sector_id = side_info->sector_id;
+                            active_span->flat_id = sector->flat_id_ceil;
+
+                            // @efficiency: precompute
+                            f32 zpp = (y_hi - SCREEN_SIZE_Y / 2.0f) *
+                                      (camera->fov.y / SCREEN_SIZE_Y);
+
+                            // distance of the ray from the player through x_lo at the floor.
+                            f32 radius = (z_ceil - camera->z) / zpp;
+
+                            active_span->colormap_index =
+                                sector->light_level +
+                                (u8)(darkness_per_world_dist * radius);
+                            active_span->colormap_index =
+                                min(active_span->colormap_index, max_colormap_index);
+
+                            // Location of the 1st ray's intersection
+                            // TODO: We need to change the camera pos if rendering through a portal.
+                            // TODO: That also means changing ray_dir_lo and ray_dir_hi.
+                            active_span->hit.x = camera->pos.x + radius * ray_dir_lo.x;
+                            active_span->hit.y = camera->pos.y + radius * ray_dir_lo.y;
+
+                            // Each step is(hit_x2 - hit_x) / SCREEN_SIZE_X;
+                            // = ((camera->pos.x + radius * ray_dir_lo_x) - (camera->pos.x + radius *
+                            // ray_dir_lo_x)) / SCREEN_SIZE_X = (radius * ray_dir_lo_x - (radius *
+                            // ray_dir_lo_x)) / SCREEN_SIZE_X = radius * (ray_dir_hi_x - ray_dir_lo_x) /
+                            // SCREEN_SIZE_X
+                            // @efficiency - could precompute the delta divided by sceen size.
+                            active_span->step.x =
+                                radius * (ray_dir_hi.x - ray_dir_lo.x) / SCREEN_SIZE_X;
+                            active_span->step.y =
+                                radius * (ray_dir_hi.y - ray_dir_lo.y) / SCREEN_SIZE_X;
+                        }
+                        else
+                        {
+                            active_span->x_end = x; // @efficiency - need to do this either way
+                        }
                     }
 
                     // Render the upper texture
@@ -781,11 +837,22 @@ void RenderWalls(
             }
         }
     }
+
+    // Render all remaining floor and ceiling spans
+    for (int y = 0; y < SCREEN_SIZE_Y; y++)
+    {
+        struct ActiveSpanData *active_span = active_spans + y;
+        if (!active_span->is_active)
+        {
+            continue;
+        }
+        RenderSpan(pixels, active_span, y);
+    }
 }
 
 void RenderObjects(
     u32 *pixels,
-    f32 *wall_raycast_radius,
+    f32 *raycast_distances,
     struct CameraState *camera)
 {
     static f32 DOOM_HEIGHT_PER_PIX = ((f32)(DOOM_PIX_PER_WALL_WIDTH)) / (TEXTURE_SIZE * TEXTURE_SIZE);
@@ -841,7 +908,7 @@ void RenderObjects(
         for (int x = x_column_lo; x <= x_column_hi; x++)
         {
 
-            if (x >= 0 && x < SCREEN_SIZE_X && wall_raycast_radius[x] > dist_to_player)
+            if (x >= 0 && x < SCREEN_SIZE_X && raycast_distances[x] > dist_to_player)
             {
                 u32 texture_x = min((u32)(x_loc), sprite_size_x - 1);
 
@@ -883,7 +950,8 @@ void RenderObjects(
 
 void Render(
     u32 *pixels,
-    f32 *wall_raycast_radius,
+    f32 *raycast_distances,
+    struct ActiveSpanData *active_spans,
     struct CameraState *camera,
     struct GameMap *game_map,
     QuarterEdge *qe_camera // dual quarter edge representing the face that the camera is in.
@@ -892,9 +960,9 @@ void Render(
     u64 rtdsc_render_start = ReadCPUTimer();
     // RenderFloorAndCeiling(pixels, camera);
     u64 rtdsc_post_floor_and_ceiling = ReadCPUTimer();
-    RenderWalls(pixels, wall_raycast_radius, camera, game_map, qe_camera);
+    Raycast(pixels, raycast_distances, active_spans, camera, game_map, qe_camera);
     u64 rtdsc_post_walls = ReadCPUTimer();
-    RenderObjects(pixels, wall_raycast_radius, camera);
+    RenderObjects(pixels, raycast_distances, camera);
     u64 rtdsc_post_objects = ReadCPUTimer();
 
     u64 dtimer_tot = rtdsc_post_objects - rtdsc_render_start;
@@ -1156,7 +1224,7 @@ int main(int argc, char *argv[])
         state.camera.dir = state.game_state.player.dir;
         state.camera.z = state.game_state.player.z;
 
-        Render(state.pixels, state.wall_raycast_radius, &state.camera, &game_map, state.game_state.player.qe_geometry);
+        Render(state.pixels, state.raycast_distances, state.active_spans, &state.camera, &game_map, state.game_state.player.qe_geometry);
         u64 rtdsc_post_render = ReadCPUTimer();
 
         DecayKeyboardState(&state.keyboard_state);
@@ -1211,7 +1279,7 @@ int main(int argc, char *argv[])
 
                 for (int x = 0; x < SCREEN_SIZE_X; x++)
                 {
-                    f32 r = state.wall_raycast_radius[x];
+                    f32 r = state.raycast_distances[x];
 
                     const f32 dw = camera->fov.x / 2 - (camera->fov.x * x) / SCREEN_SIZE_X;
                     const v2 cp = {
