@@ -522,8 +522,6 @@ void Raycast(
     f32 half_screen_size = SCREEN_SIZE_Y / 2.0f;
     f32 screen_size_y_over_fov_y = SCREEN_SIZE_Y / camera->fov.y;
 
-    u32 color_floor = 0xFF444444;
-
     memset(raycast_distances, 0, sizeof(f32) * SCREEN_SIZE_X);
     memset(active_spans, 0, sizeof(struct ActiveSpanData) * SCREEN_SIZE_Y);
 
@@ -710,7 +708,7 @@ void Raycast(
 
                         // TODO: Find a better way to skip this case / avoid it.
                         //       (floor spans at or below the screen midline)
-                        if (y_hi <= SCREEN_SIZE_Y / 2.0f)
+                        if (y_hi <= half_screen_size)
                         {
                             continue;
                         }
@@ -739,7 +737,7 @@ void Raycast(
                             active_span->flat_id = sector->flat_id_ceil;
 
                             // @efficiency: precompute
-                            f32 zpp = (y_hi - SCREEN_SIZE_Y / 2.0f) *
+                            f32 zpp = (y_hi - half_screen_size) *
                                       (camera->fov.y / SCREEN_SIZE_Y);
 
                             // distance of the ray from the player through x_lo at the floor.
@@ -789,10 +787,74 @@ void Raycast(
                     }
 
                     // Render the floor below the lower texture
-                    while (y_lo < y_floor)
+                    y_floor = min(y_floor, y_hi - 1);
+                    while (y_floor > y_lo)
                     {
                         y_lo++;
-                        pixels[(y_lo * SCREEN_SIZE_X) + x] = color_floor;
+
+                        // TODO: Find a better way to skip this case / avoid it.
+                        //       (floor spans at or below the screen midline)
+                        if (y_lo >= half_screen_size)
+                        {
+                            continue;
+                        }
+
+                        struct ActiveSpanData *active_span = active_spans + y_lo;
+
+                        // Render the span if we close it out - that is, the sector is different than
+                        // what it was before
+                        bool start_new_span = !active_span->is_active ||
+                                              active_span->sector_id != side_info->sector_id ||
+                                              active_span->x_end < x - 1;
+
+                        if (start_new_span && active_span->is_active)
+                        {
+                            // Render the span
+                            RenderSpan(pixels, active_span, y_lo);
+                        }
+
+                        if (start_new_span)
+                        {
+                            // Start a new span
+                            active_span->is_active = 1;
+                            active_span->x_start = x;
+                            active_span->x_end = x;
+                            active_span->sector_id = side_info->sector_id;
+                            active_span->flat_id = sector->flat_id_floor;
+
+                            // @efficiency: precompute
+                            f32 zpp = (half_screen_size - y_lo) *
+                                      (camera->fov.y / SCREEN_SIZE_Y);
+
+                            // distance of the ray from the player through x_lo at the floor.
+                            f32 radius = (camera->z - z_floor) / zpp;
+
+                            active_span->colormap_index =
+                                sector->light_level +
+                                (u8)(darkness_per_world_dist * radius);
+                            active_span->colormap_index =
+                                min(active_span->colormap_index, max_colormap_index);
+
+                            // Location of the 1st ray's intersection
+                            // TODO: We need to change the camera pos if rendering through a portal
+                            active_span->hit.x = camera->pos.x + radius * ray_dir_lo.x;
+                            active_span->hit.y = camera->pos.y + radius * ray_dir_lo.y;
+
+                            // Each step is(hit_x2 - hit_x) / SCREEN_SIZE_X;
+                            // = ((camera->pos.x + radius * ray_dir_lo_x) - (camera->pos.x + radius *
+                            // ray_dir_lo_x)) / SCREEN_SIZE_X = (radius * ray_dir_lo_x - (radius *
+                            // ray_dir_lo_x)) / SCREEN_SIZE_X = radius * (ray_dir_hi_x - ray_dir_lo_x) /
+                            // SCREEN_SIZE_X
+                            // @efficiency - could precompute the delta divided by sceen size.
+                            active_span->step.x =
+                                radius * (ray_dir_hi.x - ray_dir_lo.x) / SCREEN_SIZE_X;
+                            active_span->step.y =
+                                radius * (ray_dir_hi.y - ray_dir_lo.y) / SCREEN_SIZE_X;
+                        }
+                        else
+                        {
+                            active_span->x_end = x; // @efficiency - need to do this either way
+                        }
                     }
 
                     // Render the lower texture
