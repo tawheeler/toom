@@ -216,7 +216,7 @@ static void LoadAssets(struct GameMap *game_map)
         //   array of table of content entries
         //   u32 n_toc_entries = number of table of content entries
 
-        FILE *fileptr = fopen("assets/toomed.bin", "rb");
+        FILE *fileptr = fopen("assets/toomed_e1m1.bin", "rb");
         ASSERT(fileptr, "Error opening toomed binary\n");
 
         // Count the number of bytes
@@ -410,6 +410,10 @@ void RenderPatchColumn(u32 *pixels, int x_screen, int y_lower,
     // m = (y_patch_height_pix - 1) / (y_lower - y_upper)
 
     f32 m = (f32)(y_patch_height_pix - 1.0f) / (y_lower - y_upper);
+    if (m >= 0.0)
+    {
+        return; // This can happen if the y patch height is zero.
+    }
 
     // The number of (continuous) patch pixels y changes per screen pixel
     f32 y_patch_step_per_screen_pixel = m; // If y_screen goes up by 1, y_patch goes up this much
@@ -420,6 +424,10 @@ void RenderPatchColumn(u32 *pixels, int x_screen, int y_lower,
     while (y_screen > y_lo)
     {
         u32 column_offset = patch->column_offsets[x_patch];
+        if (post_data[column_offset] == 0xFF)
+        {
+            break;
+        }
         while (post_data[column_offset] != 0xFF)
         {
             u8 y_patch_delta = post_data[column_offset];
@@ -536,6 +544,11 @@ void Raycast(
 
     for (int x = 0; x < SCREEN_SIZE_X; x++)
     {
+        if (x == 4)
+        {
+            x = 4;
+        }
+
         // Camera to pixel column
         const f32 dw =
             camera->fov.x / 2 - (camera->fov.x * x) / SCREEN_SIZE_X; // TODO: Precompute once.
@@ -560,7 +573,7 @@ void Raycast(
         int y_lo = -1;
 
         int n_steps = 0;
-        while (n_steps < 100)
+        while (n_steps < 100 && y_lo < y_hi)
         {
             n_steps += 1;
 
@@ -701,19 +714,16 @@ void Raycast(
                     u32 colormap_offset = COLORMAP_OFFSET + colormap_index * 256 * sizeof(u8);
 
                     // Render the ceiling above the upper texture
-                    y_ceil = max(y_ceil, y_lo + 1);
+                    y_ceil = max(y_ceil, half_screen_size);
                     while (y_hi > y_ceil)
                     {
                         y_hi--;
 
-                        // TODO: Find a better way to skip this case / avoid it.
-                        //       (floor spans at or below the screen midline)
-                        if (y_hi <= half_screen_size)
-                        {
-                            continue;
-                        }
-
                         struct ActiveSpanData *active_span = active_spans + y_hi;
+                        if (active_span->flat_id > FLAT_COUNT)
+                        {
+                            active_span->flat_id = 0;
+                        }
 
                         // Render the span if we close it out - that is, the sector is different than
                         // what it was before
@@ -736,6 +746,11 @@ void Raycast(
                             active_span->sector_id = side_info->sector_id;
                             active_span->flat_id = sector->flat_id_ceil;
 
+                            if (active_span->flat_id > FLAT_COUNT)
+                            {
+                                active_span->flat_id = 0;
+                            }
+
                             // @efficiency: precompute
                             f32 zpp = (y_hi - half_screen_size) *
                                       (camera->fov.y / SCREEN_SIZE_Y);
@@ -752,7 +767,7 @@ void Raycast(
                             // Location of the 1st ray's intersection
                             // TODO: We need to change the camera pos if rendering through a portal.
                             // TODO: That also means changing ray_dir_lo and ray_dir_hi.
-                            active_span->hit.x = camera->pos.x + radius * ray_dir_lo.x;
+                            active_span->hit.x = camera->pos.x + radius * ray_dir_lo.x; // CONTINUE HERE - THIS BECOMES NAN
                             active_span->hit.y = camera->pos.y + radius * ray_dir_lo.y;
 
                             // Each step is(hit_x2 - hit_x) / SCREEN_SIZE_X;
@@ -777,29 +792,27 @@ void Raycast(
                     {
                         u32 patch_offset = PATCH_OFFSETS[side_info->texture_info_upper.texture_id];
                         f32 column_height = z_ceil - z_upper;
+                        u32 y_upper_clamped = max(y_upper, y_lo);
                         RenderPatchColumn(
-                            pixels, x, y_upper, y_ceil, y_upper, y_hi,
+                            pixels, x, y_upper, y_ceil, y_upper_clamped, y_hi,
                             x_along_texture,
                             side_info->texture_info_upper.x_offset,
                             side_info->texture_info_upper.y_offset, column_height,
                             patch_offset, colormap_offset);
-                        y_hi = y_upper;
+                        y_hi = y_upper_clamped;
                     }
 
                     // Render the floor below the lower texture
-                    y_floor = min(y_floor, y_hi - 1);
+                    y_floor = min(y_floor, half_screen_size);
                     while (y_floor > y_lo)
                     {
                         y_lo++;
 
-                        // TODO: Find a better way to skip this case / avoid it.
-                        //       (floor spans at or below the screen midline)
-                        if (y_lo >= half_screen_size)
-                        {
-                            continue;
-                        }
-
                         struct ActiveSpanData *active_span = active_spans + y_lo;
+                        if (active_span->flat_id > FLAT_COUNT)
+                        {
+                            active_span->flat_id = 0;
+                        }
 
                         // Render the span if we close it out - that is, the sector is different than
                         // what it was before
@@ -821,6 +834,11 @@ void Raycast(
                             active_span->x_end = x;
                             active_span->sector_id = side_info->sector_id;
                             active_span->flat_id = sector->flat_id_floor;
+
+                            if (active_span->flat_id > FLAT_COUNT)
+                            {
+                                active_span->flat_id = 0;
+                            }
 
                             // @efficiency: precompute
                             f32 zpp = (half_screen_size - y_lo) *
@@ -862,12 +880,13 @@ void Raycast(
                     {
                         u32 patch_offset = PATCH_OFFSETS[side_info->texture_info_lower.texture_id];
                         f32 column_height = z_lower - z_floor;
+                        u32 y_lower_clamped = min(y_lower, y_hi);
                         RenderPatchColumn(
                             pixels, x, y_floor, y_lower, y_lo,
-                            y_lower, x_along_texture, side_info->texture_info_lower.x_offset,
+                            y_lower_clamped, x_along_texture, side_info->texture_info_lower.x_offset,
                             side_info->texture_info_lower.y_offset, column_height, patch_offset, colormap_offset);
 
-                        y_lo = y_lower;
+                        y_lo = y_lower_clamped;
                     }
 
                     // Continue on with our projection if the side is passable.
@@ -1101,7 +1120,8 @@ int main(int argc, char *argv[])
     state.camera.fov.y = state.camera.fov.x * SCREEN_SIZE_Y / SCREEN_SIZE_X;
 
     // Init player state
-    state.game_state.player.pos = (v2){5.0, 5.0};
+    // state.game_state.player.pos = (v2){5.0, 5.0};
+    state.game_state.player.pos = (v2){-4.9, -50.5};
     state.game_state.player.dir = (v2){0.0, 0.0};
     state.game_state.player.vel = (v2){0.0, 0.0};
     state.game_state.player.omega = 0.0f;
