@@ -714,10 +714,14 @@ void Raycast(
                     u32 colormap_offset = COLORMAP_OFFSET + colormap_index * 256 * sizeof(u8);
 
                     // Render the ceiling above the upper texture
-                    y_ceil = max(y_ceil, half_screen_size);
                     while (y_hi > y_ceil)
                     {
                         y_hi--;
+                        if (y_hi < half_screen_size)
+                        {
+                            y_hi = y_ceil;
+                            break;
+                        }
 
                         struct ActiveSpanData *active_span = active_spans + y_hi;
                         if (active_span->flat_id > FLAT_COUNT)
@@ -746,11 +750,6 @@ void Raycast(
                             active_span->sector_id = side_info->sector_id;
                             active_span->flat_id = sector->flat_id_ceil;
 
-                            if (active_span->flat_id > FLAT_COUNT)
-                            {
-                                active_span->flat_id = 0;
-                            }
-
                             // @efficiency: precompute
                             f32 zpp = (y_hi - half_screen_size) *
                                       (camera->fov.y / SCREEN_SIZE_Y);
@@ -767,7 +766,7 @@ void Raycast(
                             // Location of the 1st ray's intersection
                             // TODO: We need to change the camera pos if rendering through a portal.
                             // TODO: That also means changing ray_dir_lo and ray_dir_hi.
-                            active_span->hit.x = camera->pos.x + radius * ray_dir_lo.x; // CONTINUE HERE - THIS BECOMES NAN
+                            active_span->hit.x = camera->pos.x + radius * ray_dir_lo.x;
                             active_span->hit.y = camera->pos.y + radius * ray_dir_lo.y;
 
                             // Each step is(hit_x2 - hit_x) / SCREEN_SIZE_X;
@@ -775,7 +774,7 @@ void Raycast(
                             // ray_dir_lo_x)) / SCREEN_SIZE_X = (radius * ray_dir_lo_x - (radius *
                             // ray_dir_lo_x)) / SCREEN_SIZE_X = radius * (ray_dir_hi_x - ray_dir_lo_x) /
                             // SCREEN_SIZE_X
-                            // @efficiency - could precompute the delta divided by sceen size.
+                            // @efficiency - could precompute the delta divided by screen size.
                             active_span->step.x =
                                 radius * (ray_dir_hi.x - ray_dir_lo.x) / SCREEN_SIZE_X;
                             active_span->step.y =
@@ -803,16 +802,16 @@ void Raycast(
                     }
 
                     // Render the floor below the lower texture
-                    y_floor = min(y_floor, half_screen_size);
                     while (y_floor > y_lo)
                     {
                         y_lo++;
+                        if (y_lo >= half_screen_size)
+                        {
+                            y_lo = y_floor;
+                            break;
+                        }
 
                         struct ActiveSpanData *active_span = active_spans + y_lo;
-                        if (active_span->flat_id > FLAT_COUNT)
-                        {
-                            active_span->flat_id = 0;
-                        }
 
                         // Render the span if we close it out - that is, the sector is different than
                         // what it was before
@@ -834,11 +833,6 @@ void Raycast(
                             active_span->x_end = x;
                             active_span->sector_id = side_info->sector_id;
                             active_span->flat_id = sector->flat_id_floor;
-
-                            if (active_span->flat_id > FLAT_COUNT)
-                            {
-                                active_span->flat_id = 0;
-                            }
 
                             // @efficiency: precompute
                             f32 zpp = (half_screen_size - y_lo) *
@@ -1125,8 +1119,8 @@ int main(int argc, char *argv[])
     state.game_state.player.dir = (v2){0.0, 0.0};
     state.game_state.player.vel = (v2){0.0, 0.0};
     state.game_state.player.omega = 0.0f;
-    state.game_state.player.height = 0.4;
-    state.game_state.player.z = 0.4;
+    state.game_state.player.height = 49.5f / 64.0f;
+    state.game_state.player.z = state.game_state.player.height;
     state.game_state.player.qe_geometry = DelaunayMeshGetEnclosingTriangle2(game_map.geometry_mesh, &(state.game_state.player.pos));
 
     // Init keyboard

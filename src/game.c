@@ -166,6 +166,7 @@ void Tick(
 
             // Determine whether to continue on or stop at the edge.
             bool stop_at_edge = 0;
+            bool new_sector_z = 0;
             f32 sector_z = 0.0f;
             u16 side_info_index = game_map->quarter_edge_index_to_side_info_index[qe_side->index];
             if (side_info_index != 0xFFFF)
@@ -184,6 +185,7 @@ void Tick(
                     struct SideInfo *side_info_sym = game_map->side_infos + side_info_index_sym;
                     struct Sector *sector_sym = game_map->sectors + side_info_sym->sector_id;
                     sector_z = sector_sym->z_floor;
+                    new_sector_z = 1;
                 }
             }
 
@@ -200,7 +202,10 @@ void Tick(
             {
                 // Accept the new triangle
                 state->player.qe_geometry = qe_dual_new_triangle;
-                state->player.z = sector_z + state->player.height;
+                if (new_sector_z)
+                {
+                    state->player.z = sector_z + state->player.height;
+                }
             }
         }
     }
