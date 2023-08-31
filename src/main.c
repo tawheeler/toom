@@ -448,10 +448,7 @@ void RenderPatchColumn(u32 *pixels, int x_screen, int y_lower,
                 // Render pixels
                 u8 palette_index = post_data[column_offset];
                 palette_index = colormap[palette_index];
-                u8 r = *(u8 *)(ASSETS_BINARY_BLOB2 + PALETTE_OFFSET + 3 * palette_index);
-                u8 g = *(u8 *)(ASSETS_BINARY_BLOB2 + PALETTE_OFFSET + 3 * palette_index + 1);
-                u8 b = *(u8 *)(ASSETS_BINARY_BLOB2 + PALETTE_OFFSET + 3 * palette_index + 2);
-                u32 abgr = 0xFF000000 + (((u32)b) << 16) + (((u32)g) << 8) + r;
+                u32 abgr = *(u32 *)(ASSETS_BINARY_BLOB2 + PALETTE_OFFSET + 3 * palette_index) | 0xFF000000;
 
                 // Render this color for all screen pixels that map to y_patch
                 u16 y_patch_discrete = (u16)y_patch;
@@ -503,10 +500,7 @@ void RenderSpan(u32 *pixels, struct ActiveSpanData *span, int y_screen)
         struct Flat *flat = (struct Flat *)(ASSETS_BINARY_BLOB2 + FLAT_OFFSET + span->flat_id * sizeof(struct Flat));
         u8 palette_index = flat->data[texture_x + (texture_y << 6)];
         palette_index = colormap[palette_index];
-        u8 r = *(u8 *)(ASSETS_BINARY_BLOB2 + PALETTE_OFFSET + 3 * palette_index);
-        u8 g = *(u8 *)(ASSETS_BINARY_BLOB2 + PALETTE_OFFSET + 3 * palette_index + 1);
-        u8 b = *(u8 *)(ASSETS_BINARY_BLOB2 + PALETTE_OFFSET + 3 * palette_index + 2);
-        u32 abgr = 0xFF000000 + (((u32)b) << 16) + (((u32)g) << 8) + r;
+        u32 abgr = *(u32 *)(ASSETS_BINARY_BLOB2 + PALETTE_OFFSET + 3 * palette_index) | 0xFF000000;
 
         pixels[pixels_index] = abgr;
 
@@ -699,7 +693,7 @@ void Raycast(
 
                     // Make faces that run closer to north-south brighter, and faces running closer
                     // to east-west darker. (cos > 0.7071). We're using the law of cosines.
-                    bool face_is_closer_to_east_west = v_face.x / v_face_len > 0.7071;
+                    bool face_is_closer_to_east_west = abs(v_face.x / v_face_len) > 0.7071;
                     if (face_is_closer_to_east_west)
                     {
                         colormap_index += 1; // darker
@@ -714,6 +708,7 @@ void Raycast(
                     u32 colormap_offset = COLORMAP_OFFSET + colormap_index * 256 * sizeof(u8);
 
                     // Render the ceiling above the upper texture
+                    y_ceil = max(y_lo, y_ceil);
                     while (y_hi > y_ceil)
                     {
                         y_hi--;
@@ -756,6 +751,7 @@ void Raycast(
 
                             // distance of the ray from the player through x_lo at the floor.
                             f32 radius = (z_ceil - camera->z) / zpp;
+                            radius = max(radius, 0.01f);
 
                             active_span->colormap_index =
                                 sector->light_level +
@@ -802,6 +798,7 @@ void Raycast(
                     }
 
                     // Render the floor below the lower texture
+                    y_floor = min(y_hi, y_floor);
                     while (y_floor > y_lo)
                     {
                         y_lo++;
@@ -840,6 +837,7 @@ void Raycast(
 
                             // distance of the ray from the player through x_lo at the floor.
                             f32 radius = (camera->z - z_floor) / zpp;
+                            radius = max(radius, 0.01f);
 
                             active_span->colormap_index =
                                 sector->light_level +
@@ -1315,8 +1313,8 @@ int main(int argc, char *argv[])
         u64 dtimer_render = rtdsc_post_render - rtdsc_post_tick;
         u64 dtimer_dkbs = rtdsc_post_decay_keyboard_state - rtdsc_post_render;
 
-        printf("Frame dt:   %.4fms, %.1f fps\n", dt * 1000.0, 1000.0f / max(1.0f, game_ms_elapsed));
-        printf("Total time: %.4fms (CPU freq %zu)\n", game_ms_elapsed, cpu_timer_freq);
+        printf("Frame dt:   %.4fms\n", dt * 1000.0);
+        printf("Total time: %.4fms, %.1f fps (CPU freq %zu)\n", game_ms_elapsed, 1000.0f / max(1.0f, game_ms_elapsed), cpu_timer_freq);
         printf("  Poll:   %zu (%.2f%%)\n", dtimer_poll, (100.0 * dtimer_poll) / dtimer_tot);
         printf("  Tick:   %zu (%.2f%%)\n", dtimer_tick, (100.0 * dtimer_tick) / dtimer_tot);
         printf("  Render: %zu (%.2f%%)\n", dtimer_render, (100.0 * dtimer_render) / dtimer_tot);
